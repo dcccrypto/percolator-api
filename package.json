@@ -43,5 +43,11 @@
     "api",
     "defi",
     "perpetuals"
-  ]
+  ],
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@percolator/sdk",
+      "@percolator/shared"
+    ]
+  }
 }
