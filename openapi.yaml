@@ -1,0 +1,1082 @@
+openapi: 3.0.3
+info:
+  title: Percolator API
+  version: 0.1.0
+  description: |
+    Percolator is a high-performance perpetual futures trading engine built on Solana.
+    This API provides read access to market data, trades, funding rates, and platform statistics.
+    
+    ## Features
+    - Real-time market data and pricing
+    - Trade history and volume analytics
+    - Funding rate calculations and history
+    - Open interest tracking
+    - Insurance fund monitoring
+    - Platform-wide statistics
+    - WebSocket support for live updates
+    
+    ## Rate Limits
+    - Read endpoints: 100 requests/minute
+    - Write endpoints: 20 requests/minute
+    
+    ## Caching
+    Most endpoints implement response caching with varying TTLs (10-60 seconds) to optimize performance.
+    
+  contact:
+    name: Percolator Team
+    url: https://percolator.trade
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3001
+    description: Local development server
+  - url: https://api.percolator.trade
+    description: Production server
+
+tags:
+  - name: Health
+    description: Service health monitoring
+  - name: Markets
+    description: Market data and metadata
+  - name: Prices
+    description: Price data and history
+  - name: Trades
+    description: Trade history and volume
+  - name: Funding
+    description: Funding rates and history
+  - name: Open Interest
+    description: Open interest tracking
+  - name: Insurance
+    description: Insurance fund data
+  - name: Crank
+    description: Crank status monitoring
+  - name: Oracle
+    description: Oracle price resolution
+  - name: Stats
+    description: Platform-wide statistics
+  - name: WebSocket
+    description: WebSocket metrics and real-time data streaming
+
+paths:
+  # ─── WebSocket Stats ──────────────────────────────────────────────
+  /ws/stats:
+    get:
+      tags:
+        - WebSocket
+      summary: WebSocket connection metrics
+      description: Returns current WebSocket connection counts, throughput, and rate limits
+      operationId: getWsStats
+      responses:
+        '200':
+          description: WebSocket metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSocketMetrics'
+              example:
+                totalConnections: 42
+                connectionsPerSlab:
+                  FxfD37s1XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX: 12
+                  7YcKXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX: 8
+                messagesPerSec: 15.4
+                bytesPerSec: 32768
+                limits:
+                  maxGlobalConnections: 500
+                  maxConnectionsPerSlab: 50
+                  maxConnectionsPerIp: 5
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns service health status including RPC and database connectivity
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy or degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  value:
+                    status: ok
+                    checks:
+                      db: true
+                      rpc: true
+                    uptime: 3600
+                degraded:
+                  value:
+                    status: degraded
+                    checks:
+                      db: true
+                      rpc: false
+                    uptime: 3600
+        '503':
+          description: Service is down
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: down
+                checks:
+                  db: false
+                  rpc: false
+                uptime: 3600
+
+  /markets:
+    get:
+      tags:
+        - Markets
+      summary: List all markets
+      description: Returns all markets with embedded stats from the markets_with_stats view
+      operationId: getMarkets
+      responses:
+        '200':
+          description: Successfully retrieved markets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  markets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarketWithStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /markets/stats:
+    get:
+      tags:
+        - Markets
+      summary: Get all market stats
+      description: Returns statistics for all markets from the database
+      operationId: getMarketsStats
+      responses:
+        '200':
+          description: Successfully retrieved market stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarketStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /markets/{slab}:
+    get:
+      tags:
+        - Markets
+      summary: Get market details
+      description: Returns on-chain market details for a specific slab address (10s cache)
+      operationId: getMarket
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+      responses:
+        '200':
+          description: Successfully retrieved market details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketDetails'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /markets/{slab}/stats:
+    get:
+      tags:
+        - Markets
+      summary: Get single market stats
+      description: Returns statistics for a specific market from the database
+      operationId: getMarketStats
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+      responses:
+        '200':
+          description: Successfully retrieved market stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats:
+                    $ref: '#/components/schemas/MarketStats'
+                    nullable: true
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /markets/{slab}/trades:
+    get:
+      tags:
+        - Trades
+      summary: Get recent trades for a market
+      description: Returns recent trades for a specific market
+      operationId: getMarketTrades
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+        - name: limit
+          in: query
+          description: Maximum number of trades to return (max 200)
+          schema:
+            type: integer
+            default: 100
+            maximum: 200
+      responses:
+        '200':
+          description: Successfully retrieved trades
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trades:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Trade'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /markets/{slab}/volume:
+    get:
+      tags:
+        - Trades
+      summary: Get 24h volume for a market
+      description: Returns 24-hour trading volume and trade count for a specific market
+      operationId: getMarketVolume
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+      responses:
+        '200':
+          description: Successfully retrieved volume
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slab_address:
+                    type: string
+                  volume_24h:
+                    type: string
+                    description: Total volume in last 24 hours (as string to preserve precision)
+                  trade_count_24h:
+                    type: integer
+                    description: Number of trades in last 24 hours
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /markets/{slab}/prices:
+    get:
+      tags:
+        - Prices
+      summary: Get price history for a market
+      description: Returns historical price data for charting (default 24h)
+      operationId: getMarketPriceHistory
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+        - name: hours
+          in: query
+          description: Number of hours of history to retrieve (max 720 = 30 days)
+          schema:
+            type: integer
+            default: 24
+            minimum: 1
+            maximum: 720
+      responses:
+        '200':
+          description: Successfully retrieved price history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slab_address:
+                    type: string
+                  prices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PricePoint'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /trades/recent:
+    get:
+      tags:
+        - Trades
+      summary: Get recent trades across all markets
+      description: Returns recent trades globally across all markets
+      operationId: getGlobalTrades
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of trades to return (max 200)
+          schema:
+            type: integer
+            default: 100
+            maximum: 200
+      responses:
+        '200':
+          description: Successfully retrieved trades
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trades:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Trade'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /prices/markets:
+    get:
+      tags:
+        - Prices
+      summary: Get current prices for all markets
+      description: Returns latest price data for all markets
+      operationId: getAllMarketPrices
+      responses:
+        '200':
+          description: Successfully retrieved prices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  markets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        slab_address:
+                          type: string
+                        last_price:
+                          type: string
+                          nullable: true
+                        mark_price:
+                          type: string
+                          nullable: true
+                        index_price:
+                          type: string
+                          nullable: true
+                        updated_at:
+                          type: string
+                          format: date-time
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /prices/{slab}:
+    get:
+      tags:
+        - Prices
+      summary: Get price history for a market
+      description: Returns the last 100 oracle price updates for a specific market
+      operationId: getMarketPrices
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+      responses:
+        '200':
+          description: Successfully retrieved price history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OraclePrice'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /funding/global:
+    get:
+      tags:
+        - Funding
+      summary: Get current funding rates for all markets
+      description: Returns current funding rate data for all markets (60s cache)
+      operationId: getGlobalFunding
+      responses:
+        '200':
+          description: Successfully retrieved global funding data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  markets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FundingRateSummary'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /funding/{slab}:
+    get:
+      tags:
+        - Funding
+      summary: Get funding rate for a market
+      description: Returns current funding rate and 24h history for a specific market (30s cache)
+      operationId: getMarketFunding
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+      responses:
+        '200':
+          description: Successfully retrieved funding data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FundingRateDetails'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /funding/{slab}/history:
+    get:
+      tags:
+        - Funding
+      summary: Get funding rate history
+      description: Returns historical funding rate data with optional time range
+      operationId: getMarketFundingHistory
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+        - name: limit
+          in: query
+          description: Maximum number of records to return (max 1000)
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+        - name: since
+          in: query
+          description: ISO timestamp to fetch records from
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Successfully retrieved funding history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabAddress:
+                    type: string
+                  count:
+                    type: integer
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FundingHistoryEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /open-interest/{slab}:
+    get:
+      tags:
+        - Open Interest
+      summary: Get open interest for a market
+      description: Returns current open interest data and historical records (15s cache)
+      operationId: getMarketOpenInterest
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+      responses:
+        '200':
+          description: Successfully retrieved open interest data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenInterestDetails'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /insurance/{slab}:
+    get:
+      tags:
+        - Insurance
+      summary: Get insurance fund data
+      description: Returns current insurance fund balance and historical data
+      operationId: getMarketInsurance
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+      responses:
+        '200':
+          description: Successfully retrieved insurance data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsuranceDetails'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /crank/status:
+    get:
+      tags:
+        - Crank
+      summary: Get crank status for all markets
+      description: Returns last crank slot and update time for all markets
+      operationId: getCrankStatus
+      responses:
+        '200':
+          description: Successfully retrieved crank status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  markets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        slab_address:
+                          type: string
+                        last_crank_slot:
+                          type: string
+                          nullable: true
+                        updated_at:
+                          type: string
+                          format: date-time
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /oracle/resolve/{mint}:
+    get:
+      tags:
+        - Oracle
+      summary: Resolve oracle sources for a token
+      description: Returns ranked oracle price sources for a given token mint (5min cache)
+      operationId: resolveOracle
+      parameters:
+        - name: mint
+          in: path
+          required: true
+          description: Token mint address (base58)
+          schema:
+            type: string
+            minLength: 32
+            maxLength: 44
+      responses:
+        '200':
+          description: Successfully resolved oracle sources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OracleResolution'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /stats:
+    get:
+      tags:
+        - Stats
+      summary: Get platform statistics
+      description: Returns platform-wide aggregated statistics (60s cache)
+      operationId: getStats
+      responses:
+        '200':
+          description: Successfully retrieved platform stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformStats'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  parameters:
+    SlabAddress:
+      name: slab
+      in: path
+      required: true
+      description: Market slab address (Solana public key)
+      schema:
+        type: string
+        pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
+
+  schemas:
+    WebSocketMetrics:
+      type: object
+      properties:
+        totalConnections:
+          type: integer
+          description: Total active WebSocket connections
+        connectionsPerSlab:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Connection count per slab address
+        messagesPerSec:
+          type: number
+          format: float
+          description: Average messages sent per second since last reset
+        bytesPerSec:
+          type: integer
+          description: Average bytes sent per second since last reset
+        limits:
+          type: object
+          properties:
+            maxGlobalConnections:
+              type: integer
+              description: Maximum total WebSocket connections allowed
+            maxConnectionsPerSlab:
+              type: integer
+              description: Maximum connections per slab
+            maxConnectionsPerIp:
+              type: integer
+              description: Maximum connections per IP address
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - checks
+        - uptime
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+          description: Overall service status
+        checks:
+          type: object
+          properties:
+            db:
+              type: boolean
+              description: Database connectivity status
+            rpc:
+              type: boolean
+              description: Solana RPC connectivity status
+        uptime:
+          type: integer
+          description: Service uptime in seconds
+
+    MarketWithStats:
+      type: object
+      properties:
+        slabAddress:
+          type: string
+        mintAddress:
+          type: string
+        symbol:
+          type: string
+        name:
+          type: string
+        decimals:
+          type: integer
+        deployer:
+          type: string
+        oracleAuthority:
+          type: string
+        initialPriceE6:
+          type: string
+        maxLeverage:
+          type: integer
+        tradingFeeBps:
+          type: integer
+        lpCollateral:
+          type: string
+        matcherContext:
+          type: string
+        status:
+          type: string
+        logoUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        totalOpenInterest:
+          type: string
+          nullable: true
+        totalAccounts:
+          type: integer
+          nullable: true
+        lastCrankSlot:
+          type: string
+          nullable: true
+        lastPrice:
+          type: string
+          nullable: true
+        markPrice:
+          type: string
+          nullable: true
+        indexPrice:
+          type: string
+          nullable: true
+        fundingRate:
+          type: string
+          nullable: true
+        netLpPos:
+          type: string
+          nullable: true
+
+    MarketStats:
+      type: object
+      properties:
+        slab_address:
+          type: string
+        total_open_interest:
+          type: string
+        net_lp_pos:
+          type: string
+        lp_sum_abs:
+          type: string
+        lp_max_abs:
+          type: string
+        last_price:
+          type: string
+        mark_price:
+          type: string
+        index_price:
+          type: string
+        funding_rate:
+          type: string
+        insurance_balance:
+          type: string
+        insurance_fee_revenue:
+          type: string
+        volume_24h:
+          type: string
+        last_crank_slot:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    MarketDetails:
+      type: object
+      properties:
+        slabAddress:
+          type: string
+        header:
+          type: object
+          properties:
+            magic:
+              type: string
+            version:
+              type: integer
+            admin:
+              type: string
+            resolved:
+              type: boolean
+        config:
+          type: object
+          properties:
+            collateralMint:
+              type: string
+            vault:
+              type: string
+            oracleAuthority:
+              type: string
+            authorityPriceE6:
+              type: string
+        engine:
+          type: object
+          properties:
+            vault:
+              type: string
+            totalOpenInterest:
+              type: string
+            numUsedAccounts:
+              type: integer
+            lastCrankSlot:
+              type: string
+
+    Trade:
+      type: object
+      properties:
+        id:
+          type: string
+        slab_address:
+          type: string
+        side:
+          type: string
+          enum: [long, short]
+        price_e6:
+          type: string
+        size:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        signature:
+          type: string
+
+    PricePoint:
+      type: object
+      properties:
+        price:
+          type: number
+          description: Price as decimal
+        price_e6:
+          type: string
+          description: Price in e6 format (for precision)
+        timestamp:
+          type: string
+          format: date-time
+
+    OraclePrice:
+      type: object
+      properties:
+        slab_address:
+          type: string
+        price_e6:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        source:
+          type: string
+          nullable: true
+
+    FundingRateSummary:
+      type: object
+      properties:
+        slabAddress:
+          type: string
+        currentRateBpsPerSlot:
+          type: number
+          description: Funding rate in basis points per slot
+        hourlyRatePercent:
+          type: number
+          description: Hourly funding rate as percentage
+        dailyRatePercent:
+          type: number
+          description: Daily funding rate as percentage
+        netLpPosition:
+          type: string
+          description: Net LP position (inventory imbalance)
+
+    FundingRateDetails:
+      type: object
+      properties:
+        slabAddress:
+          type: string
+        currentRateBpsPerSlot:
+          type: number
+        hourlyRatePercent:
+          type: number
+        dailyRatePercent:
+          type: number
+        annualizedPercent:
+          type: number
+        netLpPosition:
+          type: string
+        last24hHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundingHistoryEntry'
+        metadata:
+          type: object
+          properties:
+            dataPoints24h:
+              type: integer
+            explanation:
+              type: object
+              properties:
+                rateBpsPerSlot:
+                  type: string
+                hourly:
+                  type: string
+                daily:
+                  type: string
+                annualized:
+                  type: string
+                sign:
+                  type: string
+                inventory:
+                  type: string
+
+    FundingHistoryEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        slot:
+          type: string
+        rateBpsPerSlot:
+          type: number
+        netLpPos:
+          type: string
+        priceE6:
+          type: string
+        fundingIndexQpbE6:
+          type: string
+
+    OpenInterestDetails:
+      type: object
+      properties:
+        slabAddress:
+          type: string
+        totalOpenInterest:
+          type: string
+        netLpPos:
+          type: string
+        lpSumAbs:
+          type: string
+        lpMaxAbs:
+          type: string
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+              totalOi:
+                type: string
+              netLpPos:
+                type: string
+
+    InsuranceDetails:
+      type: object
+      properties:
+        slabAddress:
+          type: string
+        currentBalance:
+          type: string
+        feeRevenue:
+          type: string
+        totalOpenInterest:
+          type: string
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+              balance:
+                type: string
+              feeRevenue:
+                type: string
+
+    OracleResolution:
+      type: object
+      properties:
+        mint:
+          type: string
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              source:
+                type: string
+              price:
+                type: number
+              confidence:
+                type: number
+              rank:
+                type: integer
+        cached:
+          type: boolean
+
+    PlatformStats:
+      type: object
+      properties:
+        totalMarkets:
+          type: integer
+          description: Total number of markets
+        volume24h:
+          type: string
+          description: Aggregate 24h volume across all markets
+        totalOpenInterest:
+          type: string
+          description: Total open interest across all markets
+        uniqueDeployers:
+          type: integer
+          description: Number of unique market deployers
+        trades24h:
+          type: integer
+          description: Total number of trades in last 24 hours
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+        details:
+          type: string
+          description: Additional error details
+        hint:
+          type: string
+          description: Hint for resolving the error
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Invalid slab address
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Market stats not found
+            hint: Market may not have been cranked yet or does not exist
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Failed to fetch data
+            details: Database connection timeout
