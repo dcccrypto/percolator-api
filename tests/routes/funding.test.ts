@@ -101,7 +101,7 @@ describe("funding routes", () => {
       expect(data.annualizedPercent).toBe(788400);
     });
 
-    it("should return 404 when market not found", async () => {
+    it("should return 200 with default zeroed data when market not found", async () => {
       mockSupabase.single.mockResolvedValue({ 
         data: null, 
         error: { code: "PGRST116" } 
@@ -110,9 +110,13 @@ describe("funding routes", () => {
       const app = fundingRoutes();
       const res = await app.request("/funding/11111111111111111111111111111111");
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(200);
       const data = await res.json();
-      expect(data.error).toBe("Market stats not found");
+      expect(data.slabAddress).toBe("11111111111111111111111111111111");
+      expect(data.currentRateBpsPerSlot).toBe(0);
+      expect(data.dailyRatePercent).toBe(0);
+      expect(data.annualizedPercent).toBe(0);
+      expect(data.metadata.note).toContain("not been cranked yet");
     });
 
     it("should return 400 for invalid slab", async () => {
