@@ -81,8 +81,8 @@ export function marketRoutes(): Hono {
         .from("market_stats")
         .select("*")
         .eq("slab_address", slab)
-        .single();
-      if (error && error.code !== "PGRST116") throw error;
+        .maybeSingle();
+      if (error) throw error;
       return c.json({ stats: data ?? null });
     } catch (err) {
       return c.json({ error: "Failed to fetch market stats" }, 500);
