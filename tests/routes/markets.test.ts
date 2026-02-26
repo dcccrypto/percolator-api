@@ -50,6 +50,7 @@ describe("markets routes", () => {
       select: vi.fn(() => mockSupabase),
       eq: vi.fn(() => mockSupabase),
       single: vi.fn(() => mockSupabase),
+      maybeSingle: vi.fn(() => mockSupabase),
     };
 
     vi.mocked(getConnection).mockReturnValue(mockConnection);
@@ -271,7 +272,7 @@ describe("markets routes", () => {
         funding_rate: 5,
       };
 
-      mockSupabase.single.mockResolvedValue({ data: mockStat, error: null });
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStat, error: null });
 
       const app = marketRoutes();
       const res = await app.request("/markets/11111111111111111111111111111111/stats");
