@@ -99,10 +99,29 @@ export function fundingRoutes(): Hono {
       }
 
       if (!stats) {
-        return c.json({ 
-          error: "Market stats not found",
-          hint: "Market may not have been cranked yet or does not exist"
-        }, 404);
+        // Return default zeroed data instead of 404 — market exists but hasn't been cranked yet.
+        // This prevents console error floods from frontend polling.
+        return c.json({
+          slabAddress: slab,
+          currentRateBpsPerSlot: 0,
+          hourlyRatePercent: 0,
+          dailyRatePercent: 0,
+          annualizedPercent: 0,
+          netLpPosition: "0",
+          last24hHistory: [],
+          metadata: {
+            dataPoints24h: 0,
+            note: "Market has not been cranked yet — funding data will appear after first crank.",
+            explanation: {
+              rateBpsPerSlot: "Funding rate in basis points per slot (1 bps = 0.01%)",
+              hourly: "Rate * 9,000 slots/hour (assumes 400ms slots)",
+              daily: "Rate * 216,000 slots/day",
+              annualized: "Rate * 78,840,000 slots/year",
+              sign: "Positive = longs pay shorts | Negative = shorts pay longs",
+              inventory: "Driven by net LP position (LP inventory imbalance)",
+            }
+          }
+        });
       }
 
       // Parse current funding data
