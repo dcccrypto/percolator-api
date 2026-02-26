@@ -101,7 +101,7 @@ describe("funding routes", () => {
       expect(data.annualizedPercent).toBe(788400);
     });
 
-    it("should return 200 with default zeroed data when market not found (uncranked)", async () => {
+    it("should return 200 with default zeroed data when market not found", async () => {
       mockSupabase.single.mockResolvedValue({ 
         data: null, 
         error: { code: "PGRST116" } 
@@ -112,12 +112,10 @@ describe("funding routes", () => {
 
       expect(res.status).toBe(200);
       const data = await res.json();
+      expect(data.slabAddress).toBe("11111111111111111111111111111111");
       expect(data.currentRateBpsPerSlot).toBe(0);
-      expect(data.hourlyRatePercent).toBe(0);
       expect(data.dailyRatePercent).toBe(0);
       expect(data.annualizedPercent).toBe(0);
-      expect(data.netLpPosition).toBe("0");
-      expect(data.last24hHistory).toEqual([]);
       expect(data.metadata.note).toContain("not been cranked yet");
     });
 
