@@ -39,9 +39,13 @@ export function fundingRoutes(): Hono {
 
       const SLOTS_PER_HOUR = 9000;
       const SLOTS_PER_DAY = 216000;
+      const MAX_FUNDING_BPS = 10_000;
 
       const markets = (allStats ?? []).map((stats) => {
-        const rateBps = Number(stats.funding_rate ?? 0);
+        const rawBps = Number(stats.funding_rate ?? 0);
+        const rateBps = Number.isFinite(rawBps) && Math.abs(rawBps) <= MAX_FUNDING_BPS
+          ? rawBps
+          : 0;
         return {
           slabAddress: stats.slab_address,
           currentRateBpsPerSlot: rateBps,
@@ -137,7 +141,15 @@ export function fundingRoutes(): Hono {
       const SLOTS_PER_DAY = 216000;
       const SLOTS_PER_YEAR = 78840000;
 
-      const rateBps = Number(currentRateBpsPerSlot);
+      // Sanitize: the on-chain Rust engine clamps funding_rate to [-10_000, 10_000] bps/slot.
+      // Values outside this range are garbage (wrong-offset reads on old devnet slabs or
+      // uninitialized markets stored in DB before the guard was applied).
+      // Treat them as 0 — matches the sanitizeFundingRateBps() guard in the frontend.
+      const MAX_FUNDING_BPS = 10_000;
+      const rawBps = Number(currentRateBpsPerSlot);
+      const rateBps = Number.isFinite(rawBps) && Math.abs(rawBps) <= MAX_FUNDING_BPS
+        ? rawBps
+        : 0;
       const hourlyRatePercent = (rateBps / 10000.0) * SLOTS_PER_HOUR;
       const dailyRatePercent = (rateBps / 10000.0) * SLOTS_PER_DAY;
       const annualizedPercent = (rateBps / 10000.0) * SLOTS_PER_YEAR;

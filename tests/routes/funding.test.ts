@@ -166,6 +166,65 @@ describe("funding routes", () => {
       expect(data.hourlyRatePercent).toBe(-45);
       expect(data.dailyRatePercent).toBe(-1080);
     });
+
+    it("should sanitize garbage funding_rate values above 10_000 bps/slot", async () => {
+      // This is the bug value reported by the designer — stored in DB from old uninitialized slabs
+      const mockStats = {
+        funding_rate: 1595987084267292,
+        net_lp_pos: "0",
+      };
+
+      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      // Must be clamped to 0 — the on-chain engine rejects |rate| > 10_000
+      expect(data.currentRateBpsPerSlot).toBe(0);
+      expect(data.hourlyRatePercent).toBe(0);
+      expect(data.dailyRatePercent).toBe(0);
+      expect(data.annualizedPercent).toBe(0);
+    });
+
+    it("should sanitize garbage negative funding_rate values below -10_000 bps/slot", async () => {
+      const mockStats = {
+        funding_rate: -1595987084267292,
+        net_lp_pos: "0",
+      };
+
+      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.currentRateBpsPerSlot).toBe(0);
+      expect(data.hourlyRatePercent).toBe(0);
+    });
+
+    it("should pass through valid boundary value of exactly 10_000 bps/slot", async () => {
+      const mockStats = {
+        funding_rate: 10000,
+        net_lp_pos: "0",
+      };
+
+      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.currentRateBpsPerSlot).toBe(10000);
+      // 10000 bps/slot = 1/slot → hourly = 1 * 9000 = 9000%
+      expect(data.hourlyRatePercent).toBe(9000);
+    });
   });
 
   describe("GET /funding/:slab/history", () => {
