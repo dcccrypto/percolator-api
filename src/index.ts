@@ -22,6 +22,7 @@ import { docsRoutes } from "./routes/docs.js";
 import { setupWebSocket } from "./routes/ws.js";
 import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
 import { cacheMiddleware } from "./middleware/cache.js";
+import { ipBlocklistMiddleware } from "./middleware/ip-blocklist.js";
 
 const logger = createLogger("api");
 
@@ -86,6 +87,10 @@ app.use("*", async (c, next) => {
   }
   return next();
 });
+
+// IP Blocklist Middleware — drop blocked IPs before any further processing
+// Reads IP_BLOCKLIST env var (comma-separated IPs). Returns 403 immediately.
+app.use("*", ipBlocklistMiddleware());
 
 // Compression Middleware (gzip/brotli for JSON responses)
 app.use("*", compress());
