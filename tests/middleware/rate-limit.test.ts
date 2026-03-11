@@ -8,7 +8,7 @@ vi.mock("@percolator/shared", () => ({
   config: { supabaseUrl: "http://test", supabaseKey: "test", rpcUrl: "http://test" },
 }));
 
-import { readRateLimit, writeRateLimit } from "../../src/middleware/rate-limit.js";
+import { readRateLimit, writeRateLimit, createRateLimit } from "../../src/middleware/rate-limit.js";
 
 describe("rate-limit middleware", () => {
   beforeEach(() => {
@@ -158,6 +158,93 @@ describe("rate-limit middleware", () => {
 
       const res = await app.request("/test", { method: "POST" });
       expect(res.status).toBe(429);
+    });
+  });
+
+  describe("createRateLimit (custom per-endpoint limiter)", () => {
+    it("should allow requests within the custom limit", async () => {
+      const app = new Hono();
+      app.get("/stats", createRateLimit(60), (c) => c.json({ success: true }));
+
+      // 60 requests should all pass
+      for (let i = 0; i < 60; i++) {
+        const res = await app.request("/stats", {
+          headers: { "x-forwarded-for": "10.0.0.1" },
+        });
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it("should return 429 on the (limit + 1)th request", async () => {
+      const app = new Hono();
+      app.get("/stats", createRateLimit(60), (c) => c.json({ success: true }));
+
+      for (let i = 0; i < 60; i++) {
+        await app.request("/stats", {
+          headers: { "x-forwarded-for": "10.0.0.2" },
+        });
+      }
+
+      const res = await app.request("/stats", {
+        headers: { "x-forwarded-for": "10.0.0.2" },
+      });
+      expect(res.status).toBe(429);
+      const data = await res.json();
+      expect(data).toEqual({ error: "Rate limit exceeded" });
+    });
+
+    it("should set X-RateLimit-* headers", async () => {
+      const app = new Hono();
+      app.get("/stats", createRateLimit(60), (c) => c.json({ success: true }));
+
+      const res = await app.request("/stats", {
+        headers: { "x-forwarded-for": "10.0.0.3" },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-RateLimit-Limit")).toBe("60");
+      expect(res.headers.get("X-RateLimit-Remaining")).toBe("59");
+      expect(res.headers.get("X-RateLimit-Reset")).toBeTruthy();
+    });
+
+    it("should use isolated buckets — does not share state with readRateLimit", async () => {
+      // Exhaust the custom limiter (limit=2 for speed)
+      const app = new Hono();
+      const customMw = createRateLimit(2);
+      app.get("/stats", customMw, (c) => c.json({ endpoint: "custom" }));
+      app.get("/other", readRateLimit(), (c) => c.json({ endpoint: "global" }));
+
+      await app.request("/stats", { headers: { "x-forwarded-for": "10.0.0.4" } });
+      await app.request("/stats", { headers: { "x-forwarded-for": "10.0.0.4" } });
+
+      // Custom limiter is exhausted
+      const statsRes = await app.request("/stats", { headers: { "x-forwarded-for": "10.0.0.4" } });
+      expect(statsRes.status).toBe(429);
+
+      // Global readRateLimit bucket for same IP is unaffected
+      const otherRes = await app.request("/other", { headers: { "x-forwarded-for": "10.0.0.4" } });
+      expect(otherRes.status).toBe(200);
+    });
+
+    it("should reset after the 60-second window", async () => {
+      vi.useFakeTimers();
+
+      const app = new Hono();
+      app.get("/stats", createRateLimit(2), (c) => c.json({ success: true }));
+
+      // Exhaust
+      await app.request("/stats", { headers: { "x-forwarded-for": "10.0.0.5" } });
+      await app.request("/stats", { headers: { "x-forwarded-for": "10.0.0.5" } });
+
+      let res = await app.request("/stats", { headers: { "x-forwarded-for": "10.0.0.5" } });
+      expect(res.status).toBe(429);
+
+      // Advance past 60s window
+      vi.advanceTimersByTime(61_000);
+
+      res = await app.request("/stats", { headers: { "x-forwarded-for": "10.0.0.5" } });
+      expect(res.status).toBe(200);
+
+      vi.useRealTimers();
     });
   });
 });

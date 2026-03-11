@@ -20,7 +20,7 @@ import { openInterestRoutes } from "./routes/open-interest.js";
 import { statsRoutes } from "./routes/stats.js";
 import { docsRoutes } from "./routes/docs.js";
 import { setupWebSocket } from "./routes/ws.js";
-import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
+import { readRateLimit, writeRateLimit, createRateLimit } from "./middleware/rate-limit.js";
 import { cacheMiddleware } from "./middleware/cache.js";
 import { ipBlocklistMiddleware } from "./middleware/ip-blocklist.js";
 
@@ -125,6 +125,11 @@ app.use("*", async (c, next) => {
   }
   return writeRateLimit()(c, next);
 });
+
+// Per-endpoint rate limits (stricter than the global 100 req/min read limit)
+// Applied before caching so scrapers are throttled even on cache hits.
+// - /stats — 60 req/min (mirrors /api/trader/:wallet/trades, security #1031)
+app.use("/stats", createRateLimit(60));
 
 // Response Caching Middleware (applied per-route)
 // Cache read-heavy endpoints with varying TTLs:
