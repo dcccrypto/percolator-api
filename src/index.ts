@@ -18,6 +18,8 @@ import { oracleRouterRoutes } from "./routes/oracle-router.js";
 import { insuranceRoutes } from "./routes/insurance.js";
 import { openInterestRoutes } from "./routes/open-interest.js";
 import { statsRoutes } from "./routes/stats.js";
+import { bugsRoutes } from "./routes/bugs.js";
+import { chartRoutes } from "./routes/chart.js";
 import { docsRoutes } from "./routes/docs.js";
 import { setupWebSocket } from "./routes/ws.js";
 import { readRateLimit, writeRateLimit, createRateLimit } from "./middleware/rate-limit.js";
@@ -65,21 +67,27 @@ app.use("*", cors({
     logger.warn("CORS rejected origin", { origin });
     return null;
   },
-  // Only allow GET + OPTIONS until write endpoints are implemented.
-  // When mutation routes are added, expand this AND apply requireApiKey()
+  // GET + OPTIONS for read endpoints; POST added for POST /bugs (public bug report submission).
+  // When additional mutation routes are added, expand this AND apply requireApiKey()
   // middleware to those routes. See middleware/auth.ts.
-  allowMethods: ["GET", "OPTIONS"],
+  allowMethods: ["GET", "POST", "OPTIONS"],
   allowHeaders: ["Content-Type", "x-api-key"],
 }));
 
-// Default-deny for mutation methods. Until write endpoints are added,
-// reject any POST/PUT/DELETE/PATCH requests that reach the API.
-// When write routes are needed, apply requireApiKey() from middleware/auth.ts
-// to those specific routes and remove this global guard.
+// Default-deny for mutation methods. Reject POST/PUT/DELETE/PATCH globally,
+// except for explicitly whitelisted write endpoints:
+//   POST /bugs — public bug report submission (rate-limited per IP, no auth required)
+// When additional mutation routes are added, add them to ALLOWED_POST_PATHS and
+// apply requireApiKey() from middleware/auth.ts to those specific routes.
+const ALLOWED_POST_PATHS = new Set(["/bugs"]);
 app.use("*", async (c, next) => {
   const method = c.req.method;
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
-    logger.warn("Blocked mutation request (no write endpoints)", {
+    // Allow explicitly whitelisted POST endpoints through
+    if (method === "POST" && ALLOWED_POST_PATHS.has(c.req.path)) {
+      return next();
+    }
+    logger.warn("Blocked mutation request", {
       method,
       path: c.req.path,
     });
@@ -155,6 +163,8 @@ app.route("/", oracleRouterRoutes());
 app.route("/", insuranceRoutes());
 app.route("/", openInterestRoutes());
 app.route("/", statsRoutes());
+app.route("/", bugsRoutes());
+app.route("/", chartRoutes());
 app.route("/", docsRoutes());
 
 app.get("/", (c) => c.json({ 
