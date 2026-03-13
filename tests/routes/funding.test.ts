@@ -40,6 +40,7 @@ describe("funding routes", () => {
       select: vi.fn(() => mockSupabase),
       eq: vi.fn(() => mockSupabase),
       single: vi.fn(() => mockSupabase),
+      maybeSingle: vi.fn(() => mockSupabase),
     };
 
     vi.mocked(getSupabase).mockReturnValue(mockSupabase);
@@ -63,7 +64,7 @@ describe("funding routes", () => {
         },
       ];
 
-      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue(mockHistory);
 
       const app = fundingRoutes();
@@ -83,7 +84,7 @@ describe("funding routes", () => {
         net_lp_pos: "0",
       };
 
-      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -102,9 +103,10 @@ describe("funding routes", () => {
     });
 
     it("should return 200 with default zeroed data when market not found", async () => {
-      mockSupabase.single.mockResolvedValue({ 
+      // maybeSingle() returns { data: null, error: null } for zero rows (no PGRST116 error).
+      mockSupabase.maybeSingle.mockResolvedValue({ 
         data: null, 
-        error: { code: "PGRST116" } 
+        error: null,
       });
 
       const app = fundingRoutes();
@@ -134,7 +136,7 @@ describe("funding routes", () => {
         net_lp_pos: "0",
       };
 
-      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -154,7 +156,7 @@ describe("funding routes", () => {
         net_lp_pos: "-500000",
       };
 
-      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -174,7 +176,7 @@ describe("funding routes", () => {
         net_lp_pos: "0",
       };
 
-      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -195,7 +197,7 @@ describe("funding routes", () => {
         net_lp_pos: "0",
       };
 
-      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -213,7 +215,7 @@ describe("funding routes", () => {
         net_lp_pos: "0",
       };
 
-      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -224,6 +226,45 @@ describe("funding routes", () => {
       expect(data.currentRateBpsPerSlot).toBe(10000);
       // 10000 bps/slot = 1/slot → hourly = 1 * 9000 = 9000%
       expect(data.hourlyRatePercent).toBe(9000);
+    });
+
+    it("should return 200 with defaults when market_stats DB query errors (non-fatal)", async () => {
+      // Simulates a transient PostgREST error (e.g. schema-cache reload after migration NOTIFY).
+      // Previously this would throw and return 500 — now it degrades to default zeroed response.
+      mockSupabase.maybeSingle.mockResolvedValue({
+        data: null,
+        error: { code: "PGRST500", message: "schema cache reload" },
+      });
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.slabAddress).toBe("11111111111111111111111111111111");
+      expect(data.currentRateBpsPerSlot).toBe(0);
+      expect(data.hourlyRatePercent).toBe(0);
+      expect(data.last24hHistory).toEqual([]);
+    });
+
+    it("should return 200 with current rate but empty history when getFundingHistorySince throws", async () => {
+      // Simulates the exact Sentry BACKEND-1/2/3 scenario: market_stats fetch succeeds
+      // but the funding_history query errors out. Previously this returned 500.
+      const mockStats = { funding_rate: 25, net_lp_pos: "500000" };
+      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
+      vi.mocked(getFundingHistorySince).mockRejectedValue(new Error("funding_history unavailable"));
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.slabAddress).toBe("11111111111111111111111111111111");
+      expect(data.currentRateBpsPerSlot).toBe(25);
+      // Rates still computed from the stats data
+      expect(data.hourlyRatePercent).toBeCloseTo(22.5, 4);
+      // History falls back to empty array — no 500
+      expect(data.last24hHistory).toEqual([]);
     });
   });
 

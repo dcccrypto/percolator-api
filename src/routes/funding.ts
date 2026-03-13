@@ -91,18 +91,23 @@ export function fundingRoutes(): Hono {
     const slab = c.req.param("slab");
 
     try {
-      // Fetch current funding rate from market_stats
+      // Fetch current funding rate from market_stats.
+      // Use maybeSingle() so PostgREST returns null (not an error) when zero rows found,
+      // avoiding PGRST116 edge-cases that differ across PostgREST versions.
       const { data: stats, error: statsError } = await getSupabase()
         .from("market_stats")
         .select("funding_rate, net_lp_pos")
         .eq("slab_address", slab)
-        .single();
+        .maybeSingle();
 
-      if (statsError && statsError.code !== "PGRST116") {
-        throw statsError;
+      if (statsError) {
+        // Any DB error fetching market stats — log and fall through to defaults.
+        // This guards against transient PostgREST schema-cache reloads (e.g. after
+        // migration NOTIFY pgrst) that may return unexpected error codes.
+        logger.warn("market_stats query error, returning defaults", { slab, code: statsError.code, message: statsError.message });
       }
 
-      if (!stats) {
+      if (!stats || statsError) {
         // Return default zeroed data instead of 404 — market exists but hasn't been cranked yet.
         // This prevents console error floods from frontend polling.
         return c.json({
@@ -154,9 +159,16 @@ export function fundingRoutes(): Hono {
       const dailyRatePercent = (rateBps / 10000.0) * SLOTS_PER_DAY;
       const annualizedPercent = (rateBps / 10000.0) * SLOTS_PER_YEAR;
 
-      // Fetch 24h funding history
+      // Fetch 24h funding history — non-fatal. If the funding_history table is
+      // unavailable (e.g. schema cache reload, new slab not yet indexed, or transient
+      // DB error), we still return the current rate; we just omit the history array.
       const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const history = await getFundingHistorySince(slab, since24h);
+      let history: Awaited<ReturnType<typeof getFundingHistorySince>> = [];
+      try {
+        history = await getFundingHistorySince(slab, since24h);
+      } catch (historyErr) {
+        logger.warn("funding_history query failed, returning empty history", { slab, error: historyErr });
+      }
 
       // Format history for response
       const last24hHistory = history.map((h) => ({
