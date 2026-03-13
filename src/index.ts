@@ -18,6 +18,8 @@ import { oracleRouterRoutes } from "./routes/oracle-router.js";
 import { insuranceRoutes } from "./routes/insurance.js";
 import { openInterestRoutes } from "./routes/open-interest.js";
 import { statsRoutes } from "./routes/stats.js";
+import { bugsRoutes } from "./routes/bugs.js";
+import { chartRoutes } from "./routes/chart.js";
 import { docsRoutes } from "./routes/docs.js";
 import { setupWebSocket } from "./routes/ws.js";
 import { readRateLimit, writeRateLimit, createRateLimit } from "./middleware/rate-limit.js";
@@ -155,6 +157,8 @@ app.route("/", oracleRouterRoutes());
 app.route("/", insuranceRoutes());
 app.route("/", openInterestRoutes());
 app.route("/", statsRoutes());
+app.route("/", bugsRoutes());
+app.route("/", chartRoutes());
 app.route("/", docsRoutes());
 
 app.get("/", (c) => c.json({ 
