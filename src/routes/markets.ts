@@ -40,15 +40,24 @@ export function marketRoutes(): Hono {
           logoUrl: m.logo_url,
           createdAt: m.created_at,
           updatedAt: m.updated_at,
-          // Stats from the view
+          // Stats from the view (market_stats table, written by StatsCollector)
           totalOpenInterest: m.total_open_interest ?? null,
           totalAccounts: m.total_accounts ?? null,
           lastCrankSlot: m.last_crank_slot ?? null,
+          // last_price: sourced from market_stats (written by the oracle-keeper crank).
+          // oracle_markets is the authority for oracle config, but market_stats.last_price
+          // reflects the most recent price pushed on-chain — the more reliable runtime value.
           lastPrice: m.last_price ?? null,
           markPrice: m.mark_price ?? null,
           indexPrice: m.index_price ?? null,
           fundingRate: m.funding_rate ?? null,
           netLpPos: m.net_lp_pos ?? null,
+          // volume_24h: raw token micro-units from StatsCollector (string for BigInt safety).
+          // Callers must divide by 10^decimals before displaying as USD.
+          volume24h: m.volume_24h ?? "0",
+          // trade_count_24h: COALESCE to 0 — column added by migration 044; existing rows
+          // may be NULL until StatsCollector next writes. Zero is the correct devnet value.
+          tradeCount24h: m.trade_count_24h ?? 0,
         }));
       },
       c
