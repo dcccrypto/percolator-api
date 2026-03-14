@@ -69,17 +69,20 @@ export function healthRoutes(): Hono {
     const checks: { db: boolean; rpc: boolean } = { db: false, rpc: false };
 
     await Promise.allSettled([
-      getConnection()
-        .getSlot()
+      // getSlot() returns PromiseLike<void>, not a full Promise — wrap so .catch() is available
+      Promise.resolve(getConnection().getSlot())
         .then(() => {
           checks.rpc = true;
         })
         .catch(() => {
           checks.rpc = false;
         }),
-      getSupabase()
-        .from("markets")
-        .select("id", { count: "exact", head: true })
+      // Supabase query chain also returns PromiseLike — same fix
+      Promise.resolve(
+        getSupabase()
+          .from("markets")
+          .select("id", { count: "exact", head: true }),
+      )
         .then(() => {
           checks.db = true;
         })
