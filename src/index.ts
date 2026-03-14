@@ -30,6 +30,12 @@ const logger = createLogger("api");
 
 const app = new Hono();
 
+// Health + readiness probes registered BEFORE all middleware so they:
+//   1. Never get blocked by the IP blocklist (Railway's load balancer IPs must not be blocked)
+//   2. Always return 200 for liveness (process is alive) regardless of dep status
+//   3. Don't consume rate-limit slots (keeps health-check spam from degrading real traffic)
+app.route("/", healthRoutes());
+
 // CORS Configuration
 const allowedOrigins = process.env.CORS_ORIGINS 
   ? process.env.CORS_ORIGINS.split(",").map(s => s.trim()).filter(Boolean)
@@ -153,7 +159,6 @@ app.use("/funding/global", cacheMiddleware(60));
 // - /open-interest/:slab — 15s TTL (handled in route)
 // - /funding/:slab — 30s TTL (handled in route)
 
-app.route("/", healthRoutes());
 app.route("/", marketRoutes());
 app.route("/", tradeRoutes());
 app.route("/", priceRoutes());

@@ -86,14 +86,15 @@ describe("health routes", () => {
     expect(data.checks.db).toBe(false);
   });
 
-  it("should return 503 with down status when both RPC and DB fail", async () => {
+  it("should return 200 with down status when both RPC and DB fail (liveness probe must not trigger restarts)", async () => {
     mockConnection.getSlot.mockRejectedValue(new Error("RPC error"));
     mockSupabase.select.mockRejectedValue(new Error("DB error"));
 
     const app = healthRoutes();
     const res = await app.request("/health");
 
-    expect(res.status).toBe(503);
+    // Always 200 — process is alive even if deps are down
+    expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("down");
     expect(data.checks.rpc).toBe(false);
@@ -110,6 +111,46 @@ describe("health routes", () => {
     const data = await res.json();
     expect(typeof data.uptime).toBe("number");
     expect(data.uptime).toBeGreaterThanOrEqual(0);
+  });
+
+  describe("/ready endpoint", () => {
+    it("should return 200 when all deps are healthy", async () => {
+      mockConnection.getSlot.mockResolvedValue(123456789);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+
+      const app = healthRoutes();
+      const res = await app.request("/ready");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ready).toBe(true);
+    });
+
+    it("should return 503 when any dep is down", async () => {
+      mockConnection.getSlot.mockRejectedValue(new Error("RPC error"));
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+
+      const app = healthRoutes();
+      const res = await app.request("/ready");
+
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.ready).toBe(false);
+      expect(data.checks.rpc).toBe(false);
+      expect(data.checks.db).toBe(true);
+    });
+
+    it("should return 503 when both deps are down", async () => {
+      mockConnection.getSlot.mockRejectedValue(new Error("RPC error"));
+      mockSupabase.select.mockRejectedValue(new Error("DB error"));
+
+      const app = healthRoutes();
+      const res = await app.request("/ready");
+
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.ready).toBe(false);
+    });
   });
 
   it("should not include service field (checks boolean values only)", async () => {
