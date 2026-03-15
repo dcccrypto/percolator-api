@@ -35,7 +35,16 @@ export function fundingRoutes(): Hono {
         .from("market_stats")
         .select("slab_address, funding_rate, net_lp_pos");
 
-      if (error) throw error;
+      if (error) {
+        // Transient DB errors (e.g. PostgREST schema-cache reload after a migration NOTIFY pgrst)
+        // must not turn into 500s that alarm clients. Return empty markets list so callers can
+        // degrade gracefully and retry on the next poll cycle.
+        logger.warn("market_stats query error on /funding/global, returning empty markets", {
+          code: error.code,
+          message: error.message,
+        });
+        return c.json({ count: 0, markets: [], degraded: true });
+      }
 
       const SLOTS_PER_HOUR = 9000;
       const SLOTS_PER_DAY = 216000;
@@ -223,13 +232,22 @@ export function fundingRoutes(): Hono {
     const sinceParam = c.req.query("since");
 
     try {
-      let history;
+      let history: Awaited<ReturnType<typeof getFundingHistorySince>> = [];
       const limit = limitParam ? Math.min(parseInt(limitParam, 10), 1000) : 100;
 
-      if (sinceParam) {
-        history = await getFundingHistorySince(slab, sinceParam);
-      } else {
-        history = await getFundingHistory(slab, limit);
+      try {
+        if (sinceParam) {
+          history = await getFundingHistorySince(slab, sinceParam);
+        } else {
+          history = await getFundingHistory(slab, limit);
+        }
+      } catch (historyErr) {
+        // Non-fatal: transient DB errors (e.g. schema-cache reload, connection blip) return
+        // an empty history array so the client can still render — no 500 alarm.
+        logger.warn("funding_history query failed on /funding/:slab/history, returning empty", {
+          slab,
+          error: historyErr,
+        });
       }
 
       return c.json({
@@ -243,6 +261,7 @@ export function fundingRoutes(): Hono {
           priceE6: h.price_e6,
           fundingIndexQpbE6: h.funding_index_qpb_e6,
         })),
+        ...(history.length === 0 && { degraded: true }),
       });
     } catch (err) {
       logger.error("Error fetching funding history", { slab, error: err });

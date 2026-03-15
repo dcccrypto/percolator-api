@@ -329,6 +329,37 @@ describe("funding routes", () => {
       const data = await res.json();
       expect(data.error).toBe("Invalid slab address");
     });
+
+    it("should return 200 with empty history when getFundingHistory throws (Sentry PERC-568 regression)", async () => {
+      // Simulates a transient DB error on the /history endpoint.
+      // Previously this would propagate to the outer catch and return 500.
+      vi.mocked(getFundingHistory).mockRejectedValue(new Error("funding_history DB unavailable"));
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111/history");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.slabAddress).toBe("11111111111111111111111111111111");
+      expect(data.count).toBe(0);
+      expect(data.history).toEqual([]);
+      expect(data.degraded).toBe(true);
+    });
+
+    it("should return 200 with empty history when getFundingHistorySince throws (since param)", async () => {
+      vi.mocked(getFundingHistorySince).mockRejectedValue(new Error("funding_history schema reload"));
+
+      const app = fundingRoutes();
+      const res = await app.request(
+        "/funding/11111111111111111111111111111111/history?since=2025-01-01T00:00:00Z"
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.count).toBe(0);
+      expect(data.history).toEqual([]);
+      expect(data.degraded).toBe(true);
+    });
   });
 
   describe("GET /funding/global", () => {
@@ -397,6 +428,27 @@ describe("funding routes", () => {
       const data = await res.json();
       expect(data.count).toBe(0);
       expect(data.markets).toHaveLength(0);
+    });
+
+    it("should return 200 with empty markets on DB error (Sentry PERC-568 regression)", async () => {
+      // Simulates a transient PostgREST schema-cache reload error on /funding/global.
+      // Previously: if (error) throw error → outer catch → 500.
+      // Now: logs warn and returns { count: 0, markets: [], degraded: true }.
+      mockSupabase.from.mockReturnValue({
+        select: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: "PGRST500", message: "schema cache reload" },
+        }),
+      });
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/global");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.count).toBe(0);
+      expect(data.markets).toEqual([]);
+      expect(data.degraded).toBe(true);
     });
   });
 });
