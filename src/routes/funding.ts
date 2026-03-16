@@ -31,18 +31,15 @@ export function fundingRoutes(): Hono {
    */
   app.get("/funding/global", async (c) => {
     try {
-      const { data: allStats, error } = await getSupabase()
-        .from("market_stats")
-        .select("slab_address, funding_rate, net_lp_pos");
-
-      if (error) {
-        // Transient DB errors (e.g. PostgREST schema-cache reload after a migration NOTIFY pgrst)
-        // must not turn into 500s that alarm clients. Return empty markets list so callers can
-        // degrade gracefully and retry on the next poll cycle.
-        logger.warn("market_stats query error on /funding/global, returning empty markets", {
-          code: error.code,
-          message: error.message,
-        });
+      let allStats: { slab_address: string; funding_rate: number | null; net_lp_pos: string | null }[] | null = null;
+      try {
+        const result = await getSupabase()
+          .from("market_stats")
+          .select("slab_address, funding_rate, net_lp_pos");
+        if (result.error) throw result.error;
+        allStats = result.data;
+      } catch (fetchErr) {
+        logger.warn("global market_stats fetch failed, returning empty", { error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr) });
         return c.json({ count: 0, markets: [], degraded: true });
       }
 
@@ -103,11 +100,22 @@ export function fundingRoutes(): Hono {
       // Fetch current funding rate from market_stats.
       // Use maybeSingle() so PostgREST returns null (not an error) when zero rows found,
       // avoiding PGRST116 edge-cases that differ across PostgREST versions.
-      const { data: stats, error: statsError } = await getSupabase()
-        .from("market_stats")
-        .select("funding_rate, net_lp_pos")
-        .eq("slab_address", slab)
-        .maybeSingle();
+      // Wrapped in its own try/catch so network-level fetch failures (ConnectTimeoutError,
+      // DNS failures) degrade gracefully instead of bubbling to the outer 500 handler.
+      let stats: { funding_rate: number | null; net_lp_pos: string | null } | null = null;
+      let statsError: { code?: string; message?: string } | null = null;
+      try {
+        const result = await getSupabase()
+          .from("market_stats")
+          .select("funding_rate, net_lp_pos")
+          .eq("slab_address", slab)
+          .maybeSingle();
+        stats = result.data;
+        statsError = result.error;
+      } catch (fetchErr) {
+        logger.warn("market_stats fetch failed (network error), returning defaults", { slab, error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr) });
+        statsError = { message: fetchErr instanceof Error ? fetchErr.message : "network error" };
+      }
 
       if (statsError) {
         // Any DB error fetching market stats — log and fall through to defaults.
