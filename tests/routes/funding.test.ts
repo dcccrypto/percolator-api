@@ -8,6 +8,7 @@ vi.mock("@percolator/shared", () => ({
   getConnection: vi.fn(),
   getFundingHistory: vi.fn(),
   getFundingHistorySince: vi.fn(),
+  getMarketBySlabAddress: vi.fn(),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -24,7 +25,7 @@ vi.mock("@percolator/shared", () => ({
   config: { supabaseUrl: "http://test", supabaseKey: "test", rpcUrl: "http://test" },
 }));
 
-const { getFundingHistory, getFundingHistorySince, getSupabase } = 
+const { getFundingHistory, getFundingHistorySince, getSupabase, getMarketBySlabAddress } = 
   await import("@percolator/shared");
 
 describe("funding routes", () => {
@@ -44,6 +45,8 @@ describe("funding routes", () => {
     };
 
     vi.mocked(getSupabase).mockReturnValue(mockSupabase);
+    // Default: slab exists — so existing tests don't need to set this up individually.
+    vi.mocked(getMarketBySlabAddress).mockResolvedValue({ slab_address: "11111111111111111111111111111111" } as any);
   });
 
   describe("GET /funding/:slab", () => {
@@ -128,6 +131,37 @@ describe("funding routes", () => {
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.error).toBe("Invalid slab address");
+    });
+
+    it("should return 404 for zombie slab not in markets table (GH-1611)", async () => {
+      // Simulates the 3 zombie slabs: 3bmCyP, 3YDqCJ, 3ZKKwsk — valid public key format
+      // but no row in the markets table → getMarketBySlabAddress returns null → 404.
+      vi.mocked(getMarketBySlabAddress).mockResolvedValue(null);
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/3bmCyPee8GWJR5aPGTyN5EyyQJLzYyD8Wkg9m1Afd1SD");
+
+      expect(res.status).toBe(404);
+      const data = await res.json();
+      expect(data.error).toBe("Market not found");
+    });
+
+    it("should proceed (not 404) when market existence check throws (GH-1611 fallback)", async () => {
+      // If the DB check itself throws (transient error), we fall through to the stats query
+      // so we degrade gracefully rather than returning 500 or blocking valid markets.
+      vi.mocked(getMarketBySlabAddress).mockRejectedValue(new Error("connection timeout"));
+      mockSupabase.maybeSingle.mockResolvedValue({ data: null, error: null });
+      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111");
+
+      // Should not be 404 (existence check threw, so we proceeded); market_stats returns
+      // null → falls through to default zeroed 200 response.
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.slabAddress).toBe("11111111111111111111111111111111");
+      expect(data.currentRateBpsPerSlot).toBe(0);
     });
 
     it("should handle zero funding rate", async () => {
@@ -328,6 +362,17 @@ describe("funding routes", () => {
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.error).toBe("Invalid slab address");
+    });
+
+    it("should return 404 for zombie slab on /history (GH-1611)", async () => {
+      vi.mocked(getMarketBySlabAddress).mockResolvedValue(null);
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/3bmCyPee8GWJR5aPGTyN5EyyQJLzYyD8Wkg9m1Afd1SD/history");
+
+      expect(res.status).toBe(404);
+      const data = await res.json();
+      expect(data.error).toBe("Market not found");
     });
 
     it("should return 200 with empty history when getFundingHistory throws (Sentry PERC-568 regression)", async () => {
