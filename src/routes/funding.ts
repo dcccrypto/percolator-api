@@ -14,6 +14,7 @@ import { cacheMiddleware } from "../middleware/cache.js";
 import { 
   getFundingHistory, 
   getFundingHistorySince,
+  getMarketBySlabAddress,
   getSupabase,
   createLogger,
 } from "@percolator/shared";
@@ -97,6 +98,27 @@ export function fundingRoutes(): Hono {
     const slab = c.req.param("slab");
 
     try {
+      // GH-1611: Check that the slab exists in the markets table before querying.
+      // Zombie slabs (e.g. 3bmCyP, 3YDqCJ, 3ZKKwsk) pass format validation but have
+      // no row in `markets` — querying market_stats or funding_history for them triggers
+      // Supabase errors that bubbled up as 500s. Return 404 instead.
+      let marketExists: boolean | null = null;
+      try {
+        const market = await getMarketBySlabAddress(slab);
+        marketExists = market !== null;
+      } catch (marketCheckErr) {
+        // If the existence check itself fails (e.g. transient DB error), log and fall
+        // through — do not 500 out. The market_stats query below will handle it gracefully.
+        logger.warn("markets existence check failed, continuing", {
+          slab,
+          error: marketCheckErr instanceof Error ? marketCheckErr.message : String(marketCheckErr),
+        });
+      }
+
+      if (marketExists === false) {
+        return c.json({ error: "Market not found" }, 404);
+      }
+
       // Fetch current funding rate from market_stats.
       // Use maybeSingle() so PostgREST returns null (not an error) when zero rows found,
       // avoiding PGRST116 edge-cases that differ across PostgREST versions.
@@ -240,6 +262,22 @@ export function fundingRoutes(): Hono {
     const sinceParam = c.req.query("since");
 
     try {
+      // GH-1611: Same zombie-slab existence check as /funding/:slab.
+      let marketExists: boolean | null = null;
+      try {
+        const market = await getMarketBySlabAddress(slab);
+        marketExists = market !== null;
+      } catch (marketCheckErr) {
+        logger.warn("markets existence check failed on /history, continuing", {
+          slab,
+          error: marketCheckErr instanceof Error ? marketCheckErr.message : String(marketCheckErr),
+        });
+      }
+
+      if (marketExists === false) {
+        return c.json({ error: "Market not found" }, 404);
+      }
+
       let history: Awaited<ReturnType<typeof getFundingHistorySince>> = [];
       const limit = limitParam ? Math.min(parseInt(limitParam, 10), 1000) : 100;
 
