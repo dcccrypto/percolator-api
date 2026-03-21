@@ -102,9 +102,11 @@ export function fundingRoutes(): Hono {
       // Zombie slabs (e.g. 3bmCyP, 3YDqCJ, 3ZKKwsk) pass format validation but have
       // no row in `markets` — querying market_stats or funding_history for them triggers
       // Supabase errors that bubbled up as 500s. Return 404 instead.
+      // GH#1511: Store the market row (not just existence) so we can populate metadata.symbol.
+      let market: Awaited<ReturnType<typeof getMarketBySlabAddress>> = null;
       let marketExists: boolean | null = null;
       try {
-        const market = await getMarketBySlabAddress(slab);
+        market = await getMarketBySlabAddress(slab);
         marketExists = market !== null;
       } catch (marketCheckErr) {
         // If the existence check itself fails (e.g. transient DB error), log and fall
@@ -124,12 +126,13 @@ export function fundingRoutes(): Hono {
       // avoiding PGRST116 edge-cases that differ across PostgREST versions.
       // Wrapped in its own try/catch so network-level fetch failures (ConnectTimeoutError,
       // DNS failures) degrade gracefully instead of bubbling to the outer 500 handler.
-      let stats: { funding_rate: number | null; net_lp_pos: string | null } | null = null;
+      // GH#1511: Also select last_price to populate metadata.last_price.
+      let stats: { funding_rate: number | null; net_lp_pos: string | null; last_price: number | null } | null = null;
       let statsError: { code?: string; message?: string } | null = null;
       try {
         const result = await getSupabase()
           .from("market_stats")
-          .select("funding_rate, net_lp_pos")
+          .select("funding_rate, net_lp_pos, last_price")
           .eq("slab_address", slab)
           .maybeSingle();
         stats = result.data;
@@ -158,6 +161,9 @@ export function fundingRoutes(): Hono {
           netLpPosition: "0",
           last24hHistory: [],
           metadata: {
+            // GH#1511: Populate symbol from markets row (already fetched above).
+            symbol: market?.symbol ?? null,
+            last_price: null,
             dataPoints24h: 0,
             note: "Market has not been cranked yet — funding data will appear after first crank.",
             explanation: {
@@ -198,6 +204,13 @@ export function fundingRoutes(): Hono {
       const dailyRatePercent = (rateBps / 10000.0) * SLOTS_PER_DAY;
       const annualizedPercent = (rateBps / 10000.0) * SLOTS_PER_YEAR;
 
+      // GH#1511: Sanitize last_price (same ceiling guard as frontend).
+      const MAX_PRICE_E6 = 1e15; // 1 billion USD in E6 — anything above is sentinel garbage
+      const rawLastPrice = Number(stats.last_price ?? 0);
+      const sanitizedLastPrice = Number.isFinite(rawLastPrice) && rawLastPrice > 0 && rawLastPrice < MAX_PRICE_E6
+        ? rawLastPrice
+        : null;
+
       // Fetch 24h funding history — non-fatal. If the funding_history table is
       // unavailable (e.g. schema cache reload, new slab not yet indexed, or transient
       // DB error), we still return the current rate; we just omit the history array.
@@ -228,6 +241,11 @@ export function fundingRoutes(): Hono {
         netLpPosition,
         last24hHistory,
         metadata: {
+          // GH#1511: Populate symbol and last_price from market row / market_stats.
+          // symbol comes from markets table (getMarketBySlabAddress).
+          // last_price comes from market_stats (added to select above).
+          symbol: market?.symbol ?? null,
+          last_price: sanitizedLastPrice,
           dataPoints24h: last24hHistory.length,
           explanation: {
             rateBpsPerSlot: "Funding rate in basis points per slot (1 bps = 0.01%)",
