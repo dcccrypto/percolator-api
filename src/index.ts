@@ -47,28 +47,37 @@ if (process.env.NODE_ENV === "production" && !process.env.CORS_ORIGINS) {
   process.exit(1);
 }
 
+// Validate HELIUS_WEBHOOK_SECRET — must be a 64-char hex string (32 bytes).
+// This is enforced at startup so misconfigured deployments fail fast.
+// Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+const webhookSecret = process.env.HELIUS_WEBHOOK_SECRET;
+if (process.env.NODE_ENV === "production") {
+  if (!webhookSecret) {
+    logger.error("HELIUS_WEBHOOK_SECRET is required in production");
+    process.exit(1);
+  }
+  if (!/^[0-9a-f]{64}$/i.test(webhookSecret)) {
+    logger.error("HELIUS_WEBHOOK_SECRET must be a 64-character hex string (32 bytes)");
+    process.exit(1);
+  }
+} else if (webhookSecret && !/^[0-9a-f]{64}$/i.test(webhookSecret)) {
+  logger.warn("HELIUS_WEBHOOK_SECRET is set but is not a valid 64-char hex string — ignored");
+}
+
 logger.info("CORS allowed origins", { origins: allowedOrigins });
 
 app.use("*", cors({
   origin: (origin) => {
     // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return null;
-    
-    // Check if origin is in allowed list
+
+    // Exact-match only — wildcard patterns (e.g. *.vercel.app) are intentionally
+    // not supported. All allowed origins must be explicitly listed in CORS_ORIGINS.
+    // For production: CORS_ORIGINS=https://percolatorlaunch.com
     if (allowedOrigins.includes(origin)) {
       return origin;
     }
 
-    // Support wildcard patterns (e.g. *.vercel.app)
-    for (const allowed of allowedOrigins) {
-      if (allowed.startsWith("https://*.")) {
-        const suffix = allowed.slice("https://*".length); // e.g. ".vercel.app"
-        if (origin.startsWith("https://") && origin.endsWith(suffix)) {
-          return origin;
-        }
-      }
-    }
-    
     // Reject disallowed origins
     logger.warn("CORS rejected origin", { origin });
     return null;
