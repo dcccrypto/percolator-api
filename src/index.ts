@@ -3,8 +3,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { serve } from "@hono/node-server";
-import { createLogger, sendInfoAlert } from "@percolator/shared";
+import { createLogger, sendInfoAlert, getSupabase, sendCriticalAlert, truncateErrorMessage } from "@percolator/shared";
 import { initSentry, sentryMiddleware, flushSentry } from "./middleware/sentry.js";
+import * as Sentry from "@sentry/node";
 
 // Initialize Sentry before anything else
 initSentry();
@@ -18,23 +19,15 @@ import { oracleRouterRoutes } from "./routes/oracle-router.js";
 import { insuranceRoutes } from "./routes/insurance.js";
 import { openInterestRoutes } from "./routes/open-interest.js";
 import { statsRoutes } from "./routes/stats.js";
-import { bugsRoutes } from "./routes/bugs.js";
-import { chartRoutes } from "./routes/chart.js";
 import { docsRoutes } from "./routes/docs.js";
 import { setupWebSocket } from "./routes/ws.js";
-import { readRateLimit, writeRateLimit, createRateLimit } from "./middleware/rate-limit.js";
+import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
+import { ipBlocklist } from "./middleware/ip-blocklist.js";
 import { cacheMiddleware } from "./middleware/cache.js";
-import { ipBlocklistMiddleware } from "./middleware/ip-blocklist.js";
 
 const logger = createLogger("api");
 
 const app = new Hono();
-
-// Health + readiness probes registered BEFORE all middleware so they:
-//   1. Never get blocked by the IP blocklist (Railway's load balancer IPs must not be blocked)
-//   2. Always return 200 for liveness (process is alive) regardless of dep status
-//   3. Don't consume rate-limit slots (keeps health-check spam from degrading real traffic)
-app.route("/", healthRoutes());
 
 // CORS Configuration
 const allowedOrigins = process.env.CORS_ORIGINS 
@@ -73,27 +66,21 @@ app.use("*", cors({
     logger.warn("CORS rejected origin", { origin });
     return null;
   },
-  // GET + OPTIONS for read endpoints; POST added for POST /bugs (public bug report submission).
-  // When additional mutation routes are added, expand this AND apply requireApiKey()
+  // Only allow GET + OPTIONS until write endpoints are implemented.
+  // When mutation routes are added, expand this AND apply requireApiKey()
   // middleware to those routes. See middleware/auth.ts.
-  allowMethods: ["GET", "POST", "OPTIONS"],
+  allowMethods: ["GET", "OPTIONS"],
   allowHeaders: ["Content-Type", "x-api-key"],
 }));
 
-// Default-deny for mutation methods. Reject POST/PUT/DELETE/PATCH globally,
-// except for explicitly whitelisted write endpoints:
-//   POST /bugs — public bug report submission (rate-limited per IP, no auth required)
-// When additional mutation routes are added, add them to ALLOWED_POST_PATHS and
-// apply requireApiKey() from middleware/auth.ts to those specific routes.
-const ALLOWED_POST_PATHS = new Set(["/bugs"]);
+// Default-deny for mutation methods. Until write endpoints are added,
+// reject any POST/PUT/DELETE/PATCH requests that reach the API.
+// When write routes are needed, apply requireApiKey() from middleware/auth.ts
+// to those specific routes and remove this global guard.
 app.use("*", async (c, next) => {
   const method = c.req.method;
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
-    // Allow explicitly whitelisted POST endpoints through
-    if (method === "POST" && ALLOWED_POST_PATHS.has(c.req.path)) {
-      return next();
-    }
-    logger.warn("Blocked mutation request", {
+    logger.warn("Blocked mutation request (no write endpoints)", {
       method,
       path: c.req.path,
     });
@@ -102,9 +89,10 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// IP Blocklist Middleware — drop blocked IPs before any further processing
-// Reads IP_BLOCKLIST env var (comma-separated IPs). Returns 403 immediately.
-app.use("*", ipBlocklistMiddleware());
+// IP Blocklist Middleware — runs after CORS, before rate-limiting and auth.
+// Configure via IP_BLOCKLIST env var (comma-separated IPs or CIDRs).
+// Example: IP_BLOCKLIST=88.97.223.158,10.0.0.0/8
+app.use("*", ipBlocklist());
 
 // Compression Middleware (gzip/brotli for JSON responses)
 app.use("*", compress());
@@ -140,11 +128,6 @@ app.use("*", async (c, next) => {
   return writeRateLimit()(c, next);
 });
 
-// Per-endpoint rate limits (stricter than the global 100 req/min read limit)
-// Applied before caching so scrapers are throttled even on cache hits.
-// - /stats — 60 req/min (mirrors /api/trader/:wallet/trades, security #1031)
-app.use("/stats", createRateLimit(60));
-
 // Response Caching Middleware (applied per-route)
 // Cache read-heavy endpoints with varying TTLs:
 // - /markets — 30s TTL
@@ -159,6 +142,7 @@ app.use("/funding/global", cacheMiddleware(60));
 // - /open-interest/:slab — 15s TTL (handled in route)
 // - /funding/:slab — 30s TTL (handled in route)
 
+app.route("/", healthRoutes());
 app.route("/", marketRoutes());
 app.route("/", tradeRoutes());
 app.route("/", priceRoutes());
@@ -168,8 +152,6 @@ app.route("/", oracleRouterRoutes());
 app.route("/", insuranceRoutes());
 app.route("/", openInterestRoutes());
 app.route("/", statsRoutes());
-app.route("/", bugsRoutes());
-app.route("/", chartRoutes());
 app.route("/", docsRoutes());
 
 app.get("/", (c) => c.json({ 
@@ -180,8 +162,9 @@ app.get("/", (c) => c.json({
 
 // Global error handler
 app.onError((err, c) => {
-  logger.error("Unhandled error", { 
-    error: err.message, 
+  // Truncate error message for logs
+  logger.error("Unhandled error", {
+    error: truncateErrorMessage(err.message, 120),
     stack: err.stack,
     endpoint: c.req.path,
     method: c.req.method
@@ -189,7 +172,7 @@ app.onError((err, c) => {
   
   // Report to Sentry (sentryMiddleware may have already captured it,
   // but this ensures errors from middleware chain are also caught)
-  import("@sentry/node").then((Sentry) => {
+  try {
     Sentry.captureException(err, {
       tags: {
         endpoint: c.req.path,
@@ -197,12 +180,68 @@ app.onError((err, c) => {
         handler: "onError",
       },
     });
-  }).catch(() => {});
+  } catch (_sentryErr) {}
   
-  return c.json({ error: "Internal server error" }, 500);
+  // Truncate error message for API response (details only in development)
+  const showDetails = process.env.NODE_ENV !== "production";
+  return c.json({
+    error: "Internal server error",
+    ...(showDetails && { details: truncateErrorMessage(err.message, 200) })
+  }, 500);
 });
 
+// Validate NODE_ENV at startup
+const validNodeEnvs = ["production", "development", "test"];
+if (process.env.NODE_ENV && !validNodeEnvs.includes(process.env.NODE_ENV)) {
+  logger.error("Invalid NODE_ENV configuration", {
+    nodeEnv: process.env.NODE_ENV,
+    validOptions: validNodeEnvs.join(", ")
+  });
+  throw new Error(`Invalid NODE_ENV: ${process.env.NODE_ENV}. Must be one of: ${validNodeEnvs.join(", ")}`);
+}
+
 const port = Number(process.env.API_PORT ?? 3001);
+
+// Database connectivity pre-flight check
+async function verifyDatabaseConnection(): Promise<void> {
+  try {
+    logger.info("Verifying database connectivity...");
+    
+    // Query markets table to verify connection
+    const { count, error } = await getSupabase()
+      .from("markets")
+      .select("id", { count: "exact", head: true });
+    
+    if (error) {
+      throw error;
+    }
+    
+    logger.info("✓ Database connection verified", { marketCount: count });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    logger.error("✗ Database connection failed", {
+      error: errorMsg,
+      supabaseUrl: process.env.SUPABASE_URL ? "configured" : "not configured",
+      supabaseKey: process.env.SUPABASE_KEY ? "configured" : "not configured"
+    });
+    
+    // Send critical alert
+    try {
+      await sendCriticalAlert("API startup failed: Database connection failed", [
+        { name: "Error", value: errorMsg.slice(0, 200), inline: false },
+        { name: "Reason", value: "API cannot start without database connectivity", inline: false },
+      ]);
+    } catch (alertErr) {
+      logger.error("Failed to send critical alert", { error: alertErr });
+    }
+    
+    process.exit(1);
+  }
+}
+
+// Verify database before starting server
+await verifyDatabaseConnection();
+
 const server = serve({ fetch: app.fetch, port }, async (info) => {
   logger.info("Percolator API started", { port: info.port });
   

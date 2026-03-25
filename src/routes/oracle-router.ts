@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { PublicKey } from "@solana/web3.js";
 import { resolvePrice, type PriceRouterResult } from "@percolator/sdk";
 import { createLogger } from "@percolator/shared";
 
@@ -16,8 +17,14 @@ export function oracleRouterRoutes(): Hono {
   app.get("/oracle/resolve/:mint", async (c) => {
     const mint = c.req.param("mint");
 
-    // Validate mint format (base58, 32-44 chars)
-    if (!mint || mint.length < 32 || mint.length > 44) {
+    // GH#1667: Validate mint by decoding via PublicKey — catches non-base58
+    // and non-32-byte inputs without relying on string-length heuristics.
+    if (!mint) {
+      return c.json({ error: "Invalid mint address" }, 400);
+    }
+    try {
+      new PublicKey(mint);
+    } catch {
       return c.json({ error: "Invalid mint address" }, 400);
     }
 
