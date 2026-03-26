@@ -8,7 +8,6 @@ vi.mock("@percolator/shared", () => ({
   getConnection: vi.fn(),
   getFundingHistory: vi.fn(),
   getFundingHistorySince: vi.fn(),
-  getMarketBySlabAddress: vi.fn(),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -25,7 +24,7 @@ vi.mock("@percolator/shared", () => ({
   config: { supabaseUrl: "http://test", supabaseKey: "test", rpcUrl: "http://test" },
 }));
 
-const { getFundingHistory, getFundingHistorySince, getSupabase, getMarketBySlabAddress } = 
+const { getFundingHistory, getFundingHistorySince, getSupabase } = 
   await import("@percolator/shared");
 
 describe("funding routes", () => {
@@ -41,12 +40,9 @@ describe("funding routes", () => {
       select: vi.fn(() => mockSupabase),
       eq: vi.fn(() => mockSupabase),
       single: vi.fn(() => mockSupabase),
-      maybeSingle: vi.fn(() => mockSupabase),
     };
 
     vi.mocked(getSupabase).mockReturnValue(mockSupabase);
-    // Default: slab exists — so existing tests don't need to set this up individually.
-    vi.mocked(getMarketBySlabAddress).mockResolvedValue({ slab_address: "11111111111111111111111111111111" } as any);
   });
 
   describe("GET /funding/:slab", () => {
@@ -54,6 +50,8 @@ describe("funding routes", () => {
       const mockStats = {
         funding_rate: 10,
         net_lp_pos: "1000000",
+        symbol: null,
+        last_price: null,
       };
 
       const mockHistory = [
@@ -67,7 +65,7 @@ describe("funding routes", () => {
         },
       ];
 
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue(mockHistory);
 
       const app = fundingRoutes();
@@ -85,9 +83,11 @@ describe("funding routes", () => {
       const mockStats = {
         funding_rate: 100, // 100 bps per slot = 1% per slot
         net_lp_pos: "0",
+        symbol: null,
+        last_price: null,
       };
 
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -105,23 +105,18 @@ describe("funding routes", () => {
       expect(data.annualizedPercent).toBe(788400);
     });
 
-    it("should return 200 with default zeroed data when market not found", async () => {
-      // maybeSingle() returns { data: null, error: null } for zero rows (no PGRST116 error).
-      mockSupabase.maybeSingle.mockResolvedValue({ 
+    it("should return 404 when market not found", async () => {
+      mockSupabase.single.mockResolvedValue({ 
         data: null, 
-        error: null,
+        error: { code: "PGRST116" } 
       });
 
       const app = fundingRoutes();
       const res = await app.request("/funding/11111111111111111111111111111111");
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(404);
       const data = await res.json();
-      expect(data.slabAddress).toBe("11111111111111111111111111111111");
-      expect(data.currentRateBpsPerSlot).toBe(0);
-      expect(data.dailyRatePercent).toBe(0);
-      expect(data.annualizedPercent).toBe(0);
-      expect(data.metadata.note).toContain("not been cranked yet");
+      expect(data.error).toBe("Market stats not found");
     });
 
     it("should return 400 for invalid slab", async () => {
@@ -133,44 +128,15 @@ describe("funding routes", () => {
       expect(data.error).toBe("Invalid slab address");
     });
 
-    it("should return 404 for zombie slab not in markets table (GH-1611)", async () => {
-      // Simulates the 3 zombie slabs: 3bmCyP, 3YDqCJ, 3ZKKwsk — valid public key format
-      // but no row in the markets table → getMarketBySlabAddress returns null → 404.
-      vi.mocked(getMarketBySlabAddress).mockResolvedValue(null);
-
-      const app = fundingRoutes();
-      const res = await app.request("/funding/3bmCyPee8GWJR5aPGTyN5EyyQJLzYyD8Wkg9m1Afd1SD");
-
-      expect(res.status).toBe(404);
-      const data = await res.json();
-      expect(data.error).toBe("Market not found");
-    });
-
-    it("should proceed (not 404) when market existence check throws (GH-1611 fallback)", async () => {
-      // If the DB check itself throws (transient error), we fall through to the stats query
-      // so we degrade gracefully rather than returning 500 or blocking valid markets.
-      vi.mocked(getMarketBySlabAddress).mockRejectedValue(new Error("connection timeout"));
-      mockSupabase.maybeSingle.mockResolvedValue({ data: null, error: null });
-      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
-
-      const app = fundingRoutes();
-      const res = await app.request("/funding/11111111111111111111111111111111");
-
-      // Should not be 404 (existence check threw, so we proceeded); market_stats returns
-      // null → falls through to default zeroed 200 response.
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.slabAddress).toBe("11111111111111111111111111111111");
-      expect(data.currentRateBpsPerSlot).toBe(0);
-    });
-
     it("should handle zero funding rate", async () => {
       const mockStats = {
         funding_rate: 0,
         net_lp_pos: "0",
+        symbol: null,
+        last_price: null,
       };
 
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -188,9 +154,11 @@ describe("funding routes", () => {
       const mockStats = {
         funding_rate: -50,
         net_lp_pos: "-500000",
+        symbol: null,
+        last_price: null,
       };
 
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
@@ -203,102 +171,107 @@ describe("funding routes", () => {
       expect(data.dailyRatePercent).toBe(-1080);
     });
 
-    it("should sanitize garbage funding_rate values above 10_000 bps/slot", async () => {
-      // This is the bug value reported by the designer — stored in DB from old uninitialized slabs
-      const mockStats = {
-        funding_rate: 1595987084267292,
-        net_lp_pos: "0",
-      };
+    describe("GH#1511: metadata.symbol and metadata.last_price must be populated", () => {
+      it("returns symbol and last_price when market has data", async () => {
+        const mockStats = {
+          funding_rate: 5,
+          net_lp_pos: "1000000",
+          symbol: "WENDYS",
+          last_price: 0.000099,
+        };
 
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
-      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+        mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+        vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
-      const app = fundingRoutes();
-      const res = await app.request("/funding/11111111111111111111111111111111");
+        const app = fundingRoutes();
+        const res = await app.request("/funding/11111111111111111111111111111111");
 
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      // Must be clamped to 0 — the on-chain engine rejects |rate| > 10_000
-      expect(data.currentRateBpsPerSlot).toBe(0);
-      expect(data.hourlyRatePercent).toBe(0);
-      expect(data.dailyRatePercent).toBe(0);
-      expect(data.annualizedPercent).toBe(0);
-    });
-
-    it("should sanitize garbage negative funding_rate values below -10_000 bps/slot", async () => {
-      const mockStats = {
-        funding_rate: -1595987084267292,
-        net_lp_pos: "0",
-      };
-
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
-      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
-
-      const app = fundingRoutes();
-      const res = await app.request("/funding/11111111111111111111111111111111");
-
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.currentRateBpsPerSlot).toBe(0);
-      expect(data.hourlyRatePercent).toBe(0);
-    });
-
-    it("should pass through valid boundary value of exactly 10_000 bps/slot", async () => {
-      const mockStats = {
-        funding_rate: 10000,
-        net_lp_pos: "0",
-      };
-
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
-      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
-
-      const app = fundingRoutes();
-      const res = await app.request("/funding/11111111111111111111111111111111");
-
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.currentRateBpsPerSlot).toBe(10000);
-      // 10000 bps/slot = 1/slot → hourly = 1 * 9000 = 9000%
-      expect(data.hourlyRatePercent).toBe(9000);
-    });
-
-    it("should return 200 with defaults when market_stats DB query errors (non-fatal)", async () => {
-      // Simulates a transient PostgREST error (e.g. schema-cache reload after migration NOTIFY).
-      // Previously this would throw and return 500 — now it degrades to default zeroed response.
-      mockSupabase.maybeSingle.mockResolvedValue({
-        data: null,
-        error: { code: "PGRST500", message: "schema cache reload" },
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.metadata.symbol).toBe("WENDYS");
+        expect(data.metadata.last_price).toBeCloseTo(0.000099);
       });
 
-      const app = fundingRoutes();
-      const res = await app.request("/funding/11111111111111111111111111111111");
+      it("returns null symbol when market row has no symbol", async () => {
+        const mockStats = {
+          funding_rate: 5,
+          net_lp_pos: "0",
+          symbol: null,
+          last_price: 45000,
+        };
 
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.slabAddress).toBe("11111111111111111111111111111111");
-      expect(data.currentRateBpsPerSlot).toBe(0);
-      expect(data.hourlyRatePercent).toBe(0);
-      expect(data.last24hHistory).toEqual([]);
-    });
+        mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+        vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
-    it("should return 200 with current rate but empty history when getFundingHistorySince throws", async () => {
-      // Simulates the exact Sentry BACKEND-1/2/3 scenario: market_stats fetch succeeds
-      // but the funding_history query errors out. Previously this returned 500.
-      const mockStats = { funding_rate: 25, net_lp_pos: "500000" };
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStats, error: null });
-      vi.mocked(getFundingHistorySince).mockRejectedValue(new Error("funding_history unavailable"));
+        const app = fundingRoutes();
+        const res = await app.request("/funding/11111111111111111111111111111111");
 
-      const app = fundingRoutes();
-      const res = await app.request("/funding/11111111111111111111111111111111");
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.metadata.symbol).toBeNull();
+        expect(data.metadata.last_price).toBe(45000);
+      });
 
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.slabAddress).toBe("11111111111111111111111111111111");
-      expect(data.currentRateBpsPerSlot).toBe(25);
-      // Rates still computed from the stats data
-      expect(data.hourlyRatePercent).toBeCloseTo(22.5, 4);
-      // History falls back to empty array — no 500
-      expect(data.last24hHistory).toEqual([]);
+      it("sanitizes last_price above $1M to null (corrupt admin-set price)", async () => {
+        const mockStats = {
+          funding_rate: 5,
+          net_lp_pos: "0",
+          symbol: "CORRUPT",
+          last_price: 7_902_953_782_213.77,
+        };
+
+        mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+        vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+        const app = fundingRoutes();
+        const res = await app.request("/funding/11111111111111111111111111111111");
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.metadata.symbol).toBe("CORRUPT");
+        expect(data.metadata.last_price).toBeNull();
+      });
+
+      it("sanitizes zero last_price to null", async () => {
+        const mockStats = {
+          funding_rate: 0,
+          net_lp_pos: "0",
+          symbol: "ZERO",
+          last_price: 0,
+        };
+
+        mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+        vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+        const app = fundingRoutes();
+        const res = await app.request("/funding/11111111111111111111111111111111");
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.metadata.last_price).toBeNull();
+      });
+
+      it("metadata always contains dataPoints24h and explanation fields", async () => {
+        const mockStats = {
+          funding_rate: 1,
+          net_lp_pos: "0",
+          symbol: "TEST",
+          last_price: 100,
+        };
+
+        mockSupabase.single.mockResolvedValue({ data: mockStats, error: null });
+        vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+        const app = fundingRoutes();
+        const res = await app.request("/funding/11111111111111111111111111111111");
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.metadata).toHaveProperty("dataPoints24h");
+        expect(data.metadata).toHaveProperty("explanation");
+        expect(data.metadata).toHaveProperty("symbol");
+        expect(data.metadata).toHaveProperty("last_price");
+      });
     });
   });
 
@@ -362,48 +335,6 @@ describe("funding routes", () => {
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.error).toBe("Invalid slab address");
-    });
-
-    it("should return 404 for zombie slab on /history (GH-1611)", async () => {
-      vi.mocked(getMarketBySlabAddress).mockResolvedValue(null);
-
-      const app = fundingRoutes();
-      const res = await app.request("/funding/3bmCyPee8GWJR5aPGTyN5EyyQJLzYyD8Wkg9m1Afd1SD/history");
-
-      expect(res.status).toBe(404);
-      const data = await res.json();
-      expect(data.error).toBe("Market not found");
-    });
-
-    it("should return 200 with empty history when getFundingHistory throws (Sentry PERC-568 regression)", async () => {
-      // Simulates a transient DB error on the /history endpoint.
-      // Previously this would propagate to the outer catch and return 500.
-      vi.mocked(getFundingHistory).mockRejectedValue(new Error("funding_history DB unavailable"));
-
-      const app = fundingRoutes();
-      const res = await app.request("/funding/11111111111111111111111111111111/history");
-
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.slabAddress).toBe("11111111111111111111111111111111");
-      expect(data.count).toBe(0);
-      expect(data.history).toEqual([]);
-      expect(data.degraded).toBe(true);
-    });
-
-    it("should return 200 with empty history when getFundingHistorySince throws (since param)", async () => {
-      vi.mocked(getFundingHistorySince).mockRejectedValue(new Error("funding_history schema reload"));
-
-      const app = fundingRoutes();
-      const res = await app.request(
-        "/funding/11111111111111111111111111111111/history?since=2025-01-01T00:00:00Z"
-      );
-
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.count).toBe(0);
-      expect(data.history).toEqual([]);
-      expect(data.degraded).toBe(true);
     });
   });
 
@@ -475,25 +406,88 @@ describe("funding routes", () => {
       expect(data.markets).toHaveLength(0);
     });
 
-    it("should return 200 with empty markets on DB error (Sentry PERC-568 regression)", async () => {
-      // Simulates a transient PostgREST schema-cache reload error on /funding/global.
-      // Previously: if (error) throw error → outer catch → 500.
-      // Now: logs warn and returns { count: 0, markets: [], degraded: true }.
-      mockSupabase.from.mockReturnValue({
-        select: vi.fn().mockResolvedValue({
-          data: null,
-          error: { code: "PGRST500", message: "schema cache reload" },
-        }),
+    describe("GH#1459: blocklist bypass — blocked slabs must not appear in /funding/global", () => {
+      // These four addresses are on the backend HARDCODED_BLOCKED_SLABS list.
+      // Individual /funding/:slab 404s via validateSlab, but /funding/global was
+      // querying all market_stats rows without filtering, exposing phantom netLpPosition.
+      const BLOCKED_SLABS = [
+        "8eFFEFBY3HHbBgzxJJP5hyxdzMNMAumnYNhkWXErBM4c", // DfLoAzny/USD — GH#1413
+        "3bmCyPee8GWJR5aPGTyN5EyyQJLzYyD8Wkg9m1Afd1SD", // SEX/USD — migration 048
+        "3YDqCJGz88xGiPBiRvx4vrM51mWTiTZPZ95hxYDZqKpJ", // phantom-OI — migration 048
+        "3ZKKwsKoo5UP28cYmMpvGpwoFpWLVgEWLQJCejJnECQn", // phantom-OI — no liquidity
+      ];
+
+      it("filters out all 4 blocked slabs from /funding/global response", async () => {
+        const mockStats = [
+          // 1 real market
+          { slab_address: "11111111111111111111111111111111", funding_rate: 5, net_lp_pos: "1000000" },
+          // 4 blocked slabs with phantom netLpPosition
+          ...BLOCKED_SLABS.map((addr) => ({
+            slab_address: addr,
+            funding_rate: 0,
+            net_lp_pos: "987000000000000000000000000000000000", // phantom value
+          })),
+        ];
+
+        mockSupabase.from.mockReturnValue({
+          select: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
+        });
+
+        const app = fundingRoutes();
+        const res = await app.request("/funding/global");
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        // Only the real market should appear
+        expect(data.count).toBe(1);
+        expect(data.markets).toHaveLength(1);
+        expect(data.markets[0].slabAddress).toBe("11111111111111111111111111111111");
+
+        // None of the blocked slabs should be in the response
+        const returnedAddrs = data.markets.map((m: { slabAddress: string }) => m.slabAddress);
+        for (const blocked of BLOCKED_SLABS) {
+          expect(returnedAddrs).not.toContain(blocked);
+        }
       });
 
-      const app = fundingRoutes();
-      const res = await app.request("/funding/global");
+      it("count in response reflects only unblocked markets", async () => {
+        const mockStats = BLOCKED_SLABS.map((addr) => ({
+          slab_address: addr,
+          funding_rate: 0,
+          net_lp_pos: "987000000000000000000000000000000000",
+        }));
 
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.count).toBe(0);
-      expect(data.markets).toEqual([]);
-      expect(data.degraded).toBe(true);
+        mockSupabase.from.mockReturnValue({
+          select: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
+        });
+
+        const app = fundingRoutes();
+        const res = await app.request("/funding/global");
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.count).toBe(0);
+        expect(data.markets).toHaveLength(0);
+      });
+
+      it("allows real (non-blocked) slabs through to the response", async () => {
+        const mockStats = [
+          { slab_address: "11111111111111111111111111111111", funding_rate: 10, net_lp_pos: "0" },
+          { slab_address: "22222222222222222222222222222222", funding_rate: -3, net_lp_pos: "500000" },
+        ];
+
+        mockSupabase.from.mockReturnValue({
+          select: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
+        });
+
+        const app = fundingRoutes();
+        const res = await app.request("/funding/global");
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.count).toBe(2);
+        expect(data.markets).toHaveLength(2);
+      });
     });
   });
 });

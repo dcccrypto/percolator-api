@@ -50,7 +50,6 @@ describe("markets routes", () => {
       select: vi.fn(() => mockSupabase),
       eq: vi.fn(() => mockSupabase),
       single: vi.fn(() => mockSupabase),
-      maybeSingle: vi.fn(() => mockSupabase),
     };
 
     vi.mocked(getConnection).mockReturnValue(mockConnection);
@@ -82,9 +81,9 @@ describe("markets routes", () => {
           total_open_interest: "5000000000",
           total_accounts: 100,
           last_crank_slot: 123456789,
-          last_price: 50000000000,
-          mark_price: 50000000000,
-          index_price: 50000000000,
+          last_price: 50000,
+          mark_price: 50000,
+          index_price: 50000,
           funding_rate: 5,
           net_lp_pos: "1000000",
         },
@@ -186,9 +185,9 @@ describe("markets routes", () => {
           total_open_interest: "2000000000",
           total_accounts: 50,
           last_crank_slot: 987654321,
-          last_price: 100000000,
-          mark_price: 100000000,
-          index_price: 100000000,
+          last_price: 42500,
+          mark_price: 42500,
+          index_price: 42500,
           funding_rate: 3,
           net_lp_pos: "500000",
         },
@@ -223,8 +222,8 @@ describe("markets routes", () => {
       // Stats fields
       expect(market).toHaveProperty("totalOpenInterest", "2000000000");
       expect(market).toHaveProperty("totalAccounts", 50);
-      expect(market).toHaveProperty("lastPrice", 100000000);
-      expect(market).toHaveProperty("markPrice", 100000000);
+      expect(market).toHaveProperty("lastPrice", 42500);
+      expect(market).toHaveProperty("markPrice", 42500);
       expect(market).toHaveProperty("fundingRate", 3);
     });
 
@@ -272,7 +271,7 @@ describe("markets routes", () => {
         funding_rate: 5,
       };
 
-      mockSupabase.maybeSingle.mockResolvedValue({ data: mockStat, error: null });
+      mockSupabase.single.mockResolvedValue({ data: mockStat, error: null });
 
       const app = marketRoutes();
       const res = await app.request("/markets/11111111111111111111111111111111/stats");

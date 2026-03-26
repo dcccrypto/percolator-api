@@ -1,8 +1,6 @@
 {
   "name": "@percolator/api",
   "version": "0.1.0",
-  "description": "Percolator REST API — high-performance perpetual futures trading data on Solana",
-  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -12,20 +10,17 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "@hono/node-server": "^1.13.8",
+    "@hono/node-server": "^1.19.11",
     "@percolator/sdk": "github:dcccrypto/percolator-sdk",
     "@percolator/shared": "github:dcccrypto/percolator-shared",
     "@sentry/node": "^10.39.0",
     "@solana/web3.js": "^1.98.0",
     "@supabase/supabase-js": "^2.49.1",
-    "@upstash/ratelimit": "^2.0.8",
-    "@upstash/redis": "^1.37.0",
     "dotenv": "^16.4.7",
-    "hono": "^4.12.0",
+    "hono": "^4.12.7",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -34,22 +29,5 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/dcccrypto/percolator-api.git"
-  },
-  "keywords": [
-    "solana",
-    "percolator",
-    "api",
-    "defi",
-    "perpetuals"
-  ],
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@percolator/sdk",
-      "@percolator/shared"
-    ]
   }
 }
