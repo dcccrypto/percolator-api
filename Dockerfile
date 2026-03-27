@@ -1,5 +1,6 @@
 # Builder stage
 FROM node:22-alpine AS builder
+RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@10 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -19,4 +20,3 @@ RUN chown -R node:node /app
 USER node
 EXPOSE 3001
 CMD ["node", "dist/index.js"]
-
