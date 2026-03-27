@@ -1,128 +1,154 @@
-/**
- * ip-blocklist middleware tests.
- *
- * The middleware captures IP_BLOCKLIST and TRUSTED_PROXY_DEPTH at module-load
- * time, so we must reset modules and re-import per test to pick up env changes.
- *
- * X-Forwarded-For parsing (PROXY_DEPTH=N):
- *   idx = max(0, ips.length - N)
- *   so the resolved client IP is ips[idx] — the Nth-from-the-right entry.
- */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Hono } from "hono";
 
-type MiddlewareFn = (c: unknown, next: unknown) => Promise<unknown>;
+vi.mock("@percolator/shared", () => ({
+  createLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  })),
+}));
 
-async function buildApp(
-  blocklist?: string,
-  proxyDepth?: string,
-): Promise<Hono> {
-  // Set env vars BEFORE importing the module so constants are captured fresh.
-  if (blocklist !== undefined) {
-    process.env.IP_BLOCKLIST = blocklist;
-  } else {
-    delete process.env.IP_BLOCKLIST;
-  }
-  if (proxyDepth !== undefined) {
-    process.env.TRUSTED_PROXY_DEPTH = proxyDepth;
-  } else {
-    delete process.env.TRUSTED_PROXY_DEPTH;
-  }
-
+// We must re-import the module after each env mutation because the blocklist
+// is parsed at module load time. Use dynamic import with cache-busting.
+async function loadMiddlewareWithEnv(blocklist: string) {
   vi.resetModules();
-  const { ipBlocklistMiddleware } = await import(
-    "../../src/middleware/ip-blocklist.js"
-  );
+  process.env.IP_BLOCKLIST = blocklist;
+  const mod = await import("../../src/middleware/ip-blocklist.js");
+  return mod.ipBlocklist;
+}
 
+function makeApp(ipBlocklistFn: ReturnType<typeof import("../../src/middleware/ip-blocklist.js")["ipBlocklist"]>) {
   const app = new Hono();
-  app.use("*", (ipBlocklistMiddleware as () => MiddlewareFn)());
-  app.get("/test", (c) => c.json({ ok: true }));
+  app.use("*", ipBlocklistFn());
+  app.get("*", (c) => c.json({ ok: true }));
   return app;
 }
 
-describe("ipBlocklistMiddleware", () => {
-  let savedEnv: typeof process.env;
+function makeRequest(ip: string, path = "/test") {
+  return new Request(`http://localhost${path}`, {
+    headers: { "x-forwarded-for": ip },
+  });
+}
 
+describe("ipBlocklist middleware", () => {
   beforeEach(() => {
-    savedEnv = { ...process.env };
+    process.env.TRUSTED_PROXY_DEPTH = "1";
   });
 
-  afterEach(() => {
-    // Restore env and clear module cache so next test starts clean.
-    for (const key of Object.keys(process.env)) {
-      if (!(key in savedEnv)) delete process.env[key];
-    }
-    Object.assign(process.env, savedEnv);
-    vi.resetModules();
-  });
-
-  it("allows all requests when IP_BLOCKLIST is empty", async () => {
-    const app = await buildApp("");
-    const res = await app.request("/test", {
-      headers: { "x-forwarded-for": "1.2.3.4" },
-    });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
-  });
-
-  it("allows requests when IP_BLOCKLIST is not set", async () => {
-    const app = await buildApp(undefined);
-    const res = await app.request("/test", {
-      headers: { "x-forwarded-for": "1.2.3.4" },
-    });
+  it("allows requests when blocklist is empty", async () => {
+    const fn = await loadMiddlewareWithEnv("");
+    const app = makeApp(fn);
+    const res = await app.request(makeRequest("88.97.223.158"));
     expect(res.status).toBe(200);
   });
 
-  it("blocks a single matching IP (PROXY_DEPTH=1)", async () => {
-    // PROXY_DEPTH=1: idx = max(0, n-1)
-    // With "10.0.0.1, 5.6.7.8": n=2, idx=1 → resolved IP = "5.6.7.8"
-    const app = await buildApp("5.6.7.8", "1");
-    const res = await app.request("/test", {
-      headers: { "x-forwarded-for": "10.0.0.1, 5.6.7.8" },
-    });
+  it("blocks an exact-match IP", async () => {
+    const fn = await loadMiddlewareWithEnv("88.97.223.158");
+    const app = makeApp(fn);
+    const res = await app.request(makeRequest("88.97.223.158"));
     expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body).toEqual({ error: "Forbidden" });
+    expect(body.error).toBe("Forbidden");
   });
 
-  it("allows a non-blocked IP (PROXY_DEPTH=1)", async () => {
-    // Resolved IP = "9.9.9.9" (rightmost) → not blocked
-    const app = await buildApp("5.6.7.8", "1");
-    const res = await app.request("/test", {
-      headers: { "x-forwarded-for": "10.0.0.1, 9.9.9.9" },
-    });
+  it("allows a non-blocklisted IP when blocklist has entries", async () => {
+    const fn = await loadMiddlewareWithEnv("88.97.223.158");
+    const app = makeApp(fn);
+    const res = await app.request(makeRequest("1.2.3.4"));
     expect(res.status).toBe(200);
   });
 
-  it("blocks any of multiple comma-separated IPs in blocklist", async () => {
-    // Resolved IP = "2.2.2.2" (rightmost with PROXY_DEPTH=1)
-    const app = await buildApp("1.1.1.1, 2.2.2.2, 5.6.7.8", "1");
-    const res = await app.request("/test", {
-      headers: { "x-forwarded-for": "8.8.8.8, 2.2.2.2" },
+  it("blocks an IP matching a /24 CIDR", async () => {
+    const fn = await loadMiddlewareWithEnv("192.168.1.0/24");
+    const app = makeApp(fn);
+
+    const blocked = await app.request(makeRequest("192.168.1.99"));
+    expect(blocked.status).toBe(403);
+
+    const allowed = await app.request(makeRequest("192.168.2.1"));
+    expect(allowed.status).toBe(200);
+  });
+
+  it("blocks an IP matching a /16 CIDR", async () => {
+    const fn = await loadMiddlewareWithEnv("10.0.0.0/16");
+    const app = makeApp(fn);
+
+    const blocked = await app.request(makeRequest("10.0.255.1"));
+    expect(blocked.status).toBe(403);
+
+    const allowed = await app.request(makeRequest("10.1.0.1"));
+    expect(allowed.status).toBe(200);
+  });
+
+  it("supports multiple entries (exact + CIDR)", async () => {
+    const fn = await loadMiddlewareWithEnv("88.97.223.158,10.0.0.0/8");
+    const app = makeApp(fn);
+
+    expect((await app.request(makeRequest("88.97.223.158"))).status).toBe(403);
+    expect((await app.request(makeRequest("10.99.1.2"))).status).toBe(403);
+    expect((await app.request(makeRequest("172.16.0.1"))).status).toBe(200);
+  });
+
+  it("respects TRUSTED_PROXY_DEPTH for IP extraction", async () => {
+    process.env.TRUSTED_PROXY_DEPTH = "1";
+    const fn = await loadMiddlewareWithEnv("88.97.223.158");
+    const app = makeApp(fn);
+
+    // X-Forwarded-For: <spoofed>, <real client as seen by proxy>
+    // With depth=1 we take the LAST ip (real one added by our trusted proxy)
+    const req = new Request("http://localhost/test", {
+      headers: { "x-forwarded-for": "1.2.3.4, 88.97.223.158" },
     });
+    const res = await app.request(req);
     expect(res.status).toBe(403);
   });
 
-  it("allows IP not in a multi-entry blocklist", async () => {
-    const app = await buildApp("1.1.1.1, 2.2.2.2", "1");
-    const res = await app.request("/test", {
-      headers: { "x-forwarded-for": "8.8.8.8, 3.3.3.3" },
+  it("allows spoofed IPs that are not the trusted client IP (depth=1)", async () => {
+    process.env.TRUSTED_PROXY_DEPTH = "1";
+    const fn = await loadMiddlewareWithEnv("88.97.223.158");
+    const app = makeApp(fn);
+
+    // Attacker puts blocked IP in the header, but real IP (added by proxy) is 9.9.9.9
+    const req = new Request("http://localhost/test", {
+      headers: { "x-forwarded-for": "88.97.223.158, 9.9.9.9" },
     });
+    const res = await app.request(req);
     expect(res.status).toBe(200);
   });
+});
 
-  it("falls back to x-real-ip when TRUSTED_PROXY_DEPTH=0", async () => {
-    const app = await buildApp("5.6.7.8", "0");
-    const res = await app.request("/test", {
-      headers: { "x-real-ip": "5.6.7.8" },
-    });
-    expect(res.status).toBe(403);
+// ---------------------------------------------------------------------------
+// isClientIpBlocked — standalone helper used by the WebSocket upgrade handler
+// ---------------------------------------------------------------------------
+
+async function loadIsClientIpBlocked(blocklist: string) {
+  vi.resetModules();
+  process.env.IP_BLOCKLIST = blocklist;
+  const mod = await import("../../src/middleware/ip-blocklist.js");
+  return mod.isClientIpBlocked;
+}
+
+describe("isClientIpBlocked", () => {
+  it("returns false when blocklist is empty", async () => {
+    const check = await loadIsClientIpBlocked("");
+    expect(check("88.97.223.158")).toBe(false);
   });
 
-  it("allows requests with unknown IP when no forwarding headers present", async () => {
-    // No x-forwarded-for or x-real-ip → resolved as "unknown" → never blocked
-    const app = await buildApp("5.6.7.8", "1");
-    const res = await app.request("/test", {});
-    expect(res.status).toBe(200);
+  it("returns true for a blocked exact-match IP", async () => {
+    const check = await loadIsClientIpBlocked("88.97.223.158");
+    expect(check("88.97.223.158")).toBe(true);
+  });
+
+  it("returns false for an IP not in the blocklist", async () => {
+    const check = await loadIsClientIpBlocked("88.97.223.158");
+    expect(check("1.2.3.4")).toBe(false);
+  });
+
+  it("returns true for an IP inside a blocked CIDR", async () => {
+    const check = await loadIsClientIpBlocked("192.168.1.0/24");
+    expect(check("192.168.1.55")).toBe(true);
+    expect(check("192.168.2.1")).toBe(false);
   });
 });
