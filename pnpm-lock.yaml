@@ -16,7 +16,7 @@ importers:
         version: https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/84a4e6a1d16871a8bf3f653d166e27768ccf8df2(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@percolator/shared':
         specifier: github:dcccrypto/percolator-shared
-        version: https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/bd68a8cede4b8393b295c6f1d16ad79179c9633a(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+        version: https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/c465b102ae5c27641aa0974909d4585623dffc76(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@sentry/node':
         specifier: ^10.39.0
         version: 10.40.0
@@ -450,8 +450,12 @@ packages:
     resolution: {tarball: https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/84a4e6a1d16871a8bf3f653d166e27768ccf8df2}
     version: 0.1.0
 
-  '@percolator/shared@https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/bd68a8cede4b8393b295c6f1d16ad79179c9633a':
-    resolution: {tarball: https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/bd68a8cede4b8393b295c6f1d16ad79179c9633a}
+  '@percolator/sdk@https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/b6daec0de445e252bb28eb80891212d7c2a31659':
+    resolution: {tarball: https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/b6daec0de445e252bb28eb80891212d7c2a31659}
+    version: 0.1.0
+
+  '@percolator/shared@https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/c465b102ae5c27641aa0974909d4585623dffc76':
+    resolution: {tarball: https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/c465b102ae5c27641aa0974909d4585623dffc76}
     version: 0.1.0
 
   '@prisma/instrumentation@7.2.0':
@@ -1163,6 +1167,9 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
+  tweetnacl@1.0.3:
+    resolution: {integrity: sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==}
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -1678,14 +1685,26 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@percolator/shared@https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/bd68a8cede4b8393b295c6f1d16ad79179c9633a(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)':
+  '@percolator/sdk@https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/b6daec0de445e252bb28eb80891212d7c2a31659(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)':
     dependencies:
-      '@percolator/sdk': https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/84a4e6a1d16871a8bf3f653d166e27768ccf8df2(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@solana/spl-token': 0.4.14(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+    transitivePeerDependencies:
+      - bufferutil
+      - encoding
+      - fastestsmallesttextencoderdecoder
+      - typescript
+      - utf-8-validate
+
+  '@percolator/shared@https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/c465b102ae5c27641aa0974909d4585623dffc76(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)':
+    dependencies:
+      '@percolator/sdk': https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/b6daec0de445e252bb28eb80891212d7c2a31659(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@sentry/node': 10.40.0
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@supabase/supabase-js': 2.97.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       bs58: 6.0.0
       dotenv: 16.6.1
+      tweetnacl: 1.0.3
       zod: 4.3.6
     transitivePeerDependencies:
       - bufferutil
@@ -2455,6 +2474,8 @@ snapshots:
       get-tsconfig: 4.13.6
     optionalDependencies:
       fsevents: 2.3.3
+
+  tweetnacl@1.0.3: {}
 
   typescript@5.9.3: {}
 
