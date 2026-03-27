@@ -15,7 +15,7 @@ importers:
         specifier: github:dcccrypto/percolator-sdk
         version: https://codeload.github.com/dcccrypto/percolator-sdk/tar.gz/84a4e6a1d16871a8bf3f653d166e27768ccf8df2(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@percolator/shared':
-        specifier: github:dcccrypto/percolator-shared
+        specifier: github:dcccrypto/percolator-shared#c465b102ae5c27641aa0974909d4585623dffc76
         version: https://codeload.github.com/dcccrypto/percolator-shared/tar.gz/c465b102ae5c27641aa0974909d4585623dffc76(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@sentry/node':
         specifier: ^10.39.0
