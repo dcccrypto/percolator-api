@@ -49,6 +49,7 @@ describe("markets routes", () => {
       from: vi.fn(() => mockSupabase),
       select: vi.fn(() => mockSupabase),
       eq: vi.fn(() => mockSupabase),
+      not: vi.fn(() => mockSupabase),
       single: vi.fn(() => mockSupabase),
     };
 
@@ -91,8 +92,11 @@ describe("markets routes", () => {
 
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets_with_stats") {
+          const chainable = {
+            not: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
+          };
           return {
-            select: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
+            select: vi.fn().mockReturnValue(chainable),
           };
         }
         return mockSupabase;
@@ -144,8 +148,11 @@ describe("markets routes", () => {
 
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets_with_stats") {
+          const chainable = {
+            not: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
+          };
           return {
-            select: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
+            select: vi.fn().mockReturnValue(chainable),
           };
         }
         return mockSupabase;
@@ -195,8 +202,11 @@ describe("markets routes", () => {
 
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets_with_stats") {
+          const chainable = {
+            not: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
+          };
           return {
-            select: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
+            select: vi.fn().mockReturnValue(chainable),
           };
         }
         return mockSupabase;
