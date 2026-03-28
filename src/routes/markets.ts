@@ -35,10 +35,15 @@ export function marketRoutes(): Hono {
     const result = await withDbCacheFallback(
       "markets:all",
       async () => {
-        // Use the markets_with_stats view for a single optimized query
+        // Use the markets_with_stats view for a single optimized query.
+        // GH#1781: Exclude rows with null slab_address at the DB layer — these are
+        // incomplete "zombie" market records (TEST x2, BREW, LOBSTAR) that have no
+        // on-chain account and cannot be indexed. BLOCKED_MARKET_ADDRESSES.has(null)
+        // is false so they would otherwise slip through the JS filter below.
         const { data, error } = await getSupabase()
           .from("markets_with_stats")
-          .select("*");
+          .select("*")
+          .not("slab_address", "is", null);
 
         if (error) throw error;
 
