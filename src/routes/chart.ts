@@ -49,11 +49,27 @@ const cache = new Map<string, CacheEntry>();
 // ── GeckoTerminal helpers ──────────────────────────────────────────────────
 const GECKO_BASE = "https://api.geckoterminal.com/api/v2";
 const GECKO_HEADERS = { Accept: "application/json;version=20230302" };
+const GECKO_TIMEOUT_MS = 5_000; // 5 second timeout for all upstream fetches
+
+// ── Timeframe allowlist ────────────────────────────────────────────────────
+const VALID_TIMEFRAMES = ["minute", "hour", "day"] as const;
+type Timeframe = (typeof VALID_TIMEFRAMES)[number];
+
+function parseTimeframe(raw: string | undefined): Timeframe {
+  return VALID_TIMEFRAMES.includes(raw as Timeframe)
+    ? (raw as Timeframe)
+    : "hour";
+}
 
 async function getTopPool(mint: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GECKO_TIMEOUT_MS);
   try {
     const url = `${GECKO_BASE}/networks/solana/tokens/${mint}/pools?limit=1&sort=h24_volume_usd_liquidity_desc`;
-    const res = await fetch(url, { headers: GECKO_HEADERS });
+    const res = await fetch(url, {
+      headers: GECKO_HEADERS,
+      signal: controller.signal,
+    });
     if (!res.ok) return null;
     const json = (await res.json()) as {
       data?: Array<{ id?: string }>;
@@ -65,20 +81,27 @@ async function getTopPool(mint: string): Promise<string | null> {
   } catch (err) {
     logger.warn("getTopPool fetch error", { mint, err });
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 async function fetchOhlcv(
   poolAddress: string,
-  timeframe: string,
+  timeframe: Timeframe,
   aggregate: number,
   limit: number
 ): Promise<CandleData[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GECKO_TIMEOUT_MS);
   try {
     const url =
       `${GECKO_BASE}/networks/solana/pools/${poolAddress}/ohlcv/${timeframe}` +
       `?aggregate=${aggregate}&limit=${limit}&currency=usd&include_empty_intervals=false`;
-    const res = await fetch(url, { headers: GECKO_HEADERS });
+    const res = await fetch(url, {
+      headers: GECKO_HEADERS,
+      signal: controller.signal,
+    });
     if (!res.ok) return [];
     const json = (await res.json()) as {
       data?: { attributes?: { ohlcv_list?: number[][] } };
@@ -103,6 +126,8 @@ async function fetchOhlcv(
   } catch (err) {
     logger.warn("fetchOhlcv error", { poolAddress, err });
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -130,9 +155,8 @@ export function chartRoutes(): Hono {
       return c.json({ error: "Invalid mint address" }, 400);
     }
 
-    // Parse query params
-    const timeframe =
-      (c.req.query("timeframe") ?? "hour") as "minute" | "hour" | "day";
+    // Parse query params — validate timeframe against explicit allowlist
+    const timeframe = parseTimeframe(c.req.query("timeframe"));
     const defaultAggregate = timeframe === "minute" ? "5" : "1";
     const aggregate = Math.max(
       1,

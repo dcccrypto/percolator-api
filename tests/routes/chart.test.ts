@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { chartRoutes } from "../../src/routes/chart.js";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
@@ -56,6 +56,10 @@ describe("GET /chart/:mint", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterAll(() => {
+    vi.unstubAllGlobals();
   });
 
   it("returns 400 for invalid mint address", async () => {
@@ -201,5 +205,48 @@ describe("GET /chart/:mint", () => {
     );
     const body = await res.json();
     expect(body.candles).toEqual([]);
+  });
+
+  it("falls back to 'hour' for an invalid timeframe value", async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeJsonRes(MOCK_POOL_RES))
+      .mockResolvedValueOnce(makeJsonRes(MOCK_OHLCV_RES));
+
+    const app = makeApp();
+    // Use limit=97 to get a unique cache key not used by any other test
+    await app.request(
+      new Request(
+        `http://localhost/chart/${VALID_MINT}?timeframe=hour/../../../evil&limit=97`
+      )
+    );
+    // OHLCV URL must use 'hour', not the injected value
+    const ohlcvUrl = mockFetch.mock.calls[1]?.[0] as string;
+    expect(ohlcvUrl).toContain("/ohlcv/hour");
+    expect(ohlcvUrl).not.toContain("evil");
+  });
+
+  it("accepts all valid timeframe values", async () => {
+    // Use unique limit values (98, 99, 101) to avoid collisions with other tests
+    const cases: Array<[string, number]> = [
+      ["minute", 98],
+      ["hour", 99],
+      ["day", 101],
+    ];
+    for (const [tf, limit] of cases) {
+      vi.resetAllMocks();
+      mockFetch
+        .mockResolvedValueOnce(makeJsonRes(MOCK_POOL_RES))
+        .mockResolvedValueOnce(makeJsonRes(MOCK_OHLCV_RES));
+
+      const app = makeApp();
+      const res = await app.request(
+        new Request(
+          `http://localhost/chart/${VALID_MINT}?timeframe=${tf}&limit=${limit}`
+        )
+      );
+      expect(res.status).toBe(200);
+      const ohlcvUrl = mockFetch.mock.calls[1]?.[0] as string;
+      expect(ohlcvUrl).toContain(`/ohlcv/${tf}`);
+    }
   });
 });
