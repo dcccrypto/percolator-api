@@ -227,12 +227,38 @@ export function fundingRoutes(): Hono {
     const limitParam = c.req.query("limit");
     const sinceParam = c.req.query("since");
 
+    // PERC-8178: Cap row limit at 500 regardless of path
+    const MAX_ROWS = 500;
+
     try {
       let history;
-      const limit = limitParam ? Math.min(parseInt(limitParam, 10), 1000) : 100;
+      const limit = limitParam ? Math.min(parseInt(limitParam, 10), MAX_ROWS) : 100;
 
       if (sinceParam) {
-        history = await getFundingHistorySince(slab, sinceParam);
+        // PERC-8178: Validate sinceParam as ISO 8601 timestamp or unix epoch (seconds/ms)
+        let validatedSince: string;
+        const epochNum = Number(sinceParam);
+        if (!Number.isNaN(epochNum) && epochNum > 0) {
+          // Unix epoch — treat >1e12 as milliseconds, otherwise seconds
+          const ms = epochNum > 1e12 ? epochNum : epochNum * 1000;
+          const d = new Date(ms);
+          if (Number.isNaN(d.getTime()) || d.getFullYear() < 2020 || d.getFullYear() > 2100) {
+            return c.json({ error: "Invalid since parameter: epoch out of range" }, 400);
+          }
+          validatedSince = d.toISOString();
+        } else {
+          // Try ISO 8601 parse
+          const d = new Date(sinceParam);
+          if (Number.isNaN(d.getTime()) || d.getFullYear() < 2020 || d.getFullYear() > 2100) {
+            return c.json({ error: "Invalid since parameter: expected ISO 8601 timestamp or unix epoch" }, 400);
+          }
+          validatedSince = d.toISOString();
+        }
+        history = await getFundingHistorySince(slab, validatedSince);
+        // PERC-8178: Enforce row cap on since-based queries
+        if (history.length > MAX_ROWS) {
+          history = history.slice(0, MAX_ROWS);
+        }
       } else {
         history = await getFundingHistory(slab, limit);
       }
