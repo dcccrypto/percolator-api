@@ -4,7 +4,7 @@ import { validateSlab } from "../middleware/validateSlab.js";
 import { cacheMiddleware } from "../middleware/cache.js";
 import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine } from "@percolator/sdk";
-import { getConnection, getSupabase, createLogger, sanitizeSlabAddress } from "@percolator/shared";
+import { getConnection, getSupabase, getNetwork, createLogger, sanitizeSlabAddress } from "@percolator/shared";
 
 const logger = createLogger("api:markets");
 
@@ -40,9 +40,11 @@ export function marketRoutes(): Hono {
         // incomplete "zombie" market records (TEST x2, BREW, LOBSTAR) that have no
         // on-chain account and cannot be indexed. BLOCKED_MARKET_ADDRESSES.has(null)
         // is false so they would otherwise slip through the JS filter below.
+        // Filter by network to prevent devnet/mainnet data mixing (PERC-8192).
         const { data, error } = await getSupabase()
           .from("markets_with_stats")
           .select("*")
+          .eq("network", getNetwork())
           .not("slab_address", "is", null);
 
         if (error) throw error;

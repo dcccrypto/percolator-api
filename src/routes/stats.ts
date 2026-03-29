@@ -9,7 +9,7 @@
  * - 24h trade count
  */
 import { Hono } from "hono";
-import { getSupabase, createLogger } from "@percolator/shared";
+import { getSupabase, getNetwork, createLogger } from "@percolator/shared";
 
 const logger = createLogger("api:stats");
 
@@ -32,14 +32,18 @@ export function statsRoutes(): Hono {
    */
   app.get("/stats", async (c) => {
     try {
-      // Count total markets
+      const network = getNetwork();
+
+      // Count total markets — filter by network to prevent devnet/mainnet mixing (PERC-8192)
       const { count: marketsCount, error: marketsError } = await getSupabase()
         .from("markets")
-        .select("*", { count: "exact", head: true });
+        .select("*", { count: "exact", head: true })
+        .eq("network", network);
 
       if (marketsError) throw marketsError;
 
-      // Aggregate stats from market_stats
+      // Aggregate stats from market_stats — stats are naturally isolated since
+      // slab_address is unique per network. No network filter needed on market_stats.
       const { data: stats, error: statsError } = await getSupabase()
         .from("market_stats")
         .select("volume_24h, total_open_interest");
@@ -49,20 +53,22 @@ export function statsRoutes(): Hono {
       const volume24h = (stats ?? []).reduce((sum, s) => sum + BigInt(s.volume_24h ?? "0"), BigInt(0));
       const totalOI = (stats ?? []).reduce((sum, s) => sum + BigInt(s.total_open_interest ?? "0"), BigInt(0));
 
-      // Count unique deployers
+      // Count unique deployers — filter by network
       const { data: deployers, error: deployersError } = await getSupabase()
         .from("markets")
-        .select("deployer");
+        .select("deployer")
+        .eq("network", network);
 
       if (deployersError) throw deployersError;
 
       const uniqueDeployers = new Set((deployers ?? []).map((d) => d.deployer)).size;
 
-      // Count 24h trades
+      // Count 24h trades — filter by network
       const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { count: trades24h, error: tradesError } = await getSupabase()
         .from("trades")
         .select("*", { count: "exact", head: true })
+        .eq("network", network)
         .gte("timestamp", since24h);
 
       if (tradesError) throw tradesError;

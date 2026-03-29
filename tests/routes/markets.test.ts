@@ -8,6 +8,8 @@ import { clearDbCache } from "../../src/middleware/db-cache-fallback.js";
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
   getConnection: vi.fn(),
+  getNetwork: vi.fn(() => "devnet" as const),
+  truncateErrorMessage: vi.fn((msg: unknown, _limit?: number) => String(msg ?? "")),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -92,7 +94,8 @@ describe("markets routes", () => {
 
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets_with_stats") {
-          const chainable = {
+          const chainable: any = {
+            eq: vi.fn().mockReturnThis(),
             not: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
           };
           return {
@@ -148,7 +151,8 @@ describe("markets routes", () => {
 
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets_with_stats") {
-          const chainable = {
+          const chainable: any = {
+            eq: vi.fn().mockReturnThis(),
             not: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
           };
           return {
@@ -202,7 +206,8 @@ describe("markets routes", () => {
 
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets_with_stats") {
-          const chainable = {
+          const chainable: any = {
+            eq: vi.fn().mockReturnThis(),
             not: vi.fn().mockResolvedValue({ data: mockMarketsWithStats, error: null }),
           };
           return {
