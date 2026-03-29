@@ -310,22 +310,81 @@ describe("funding routes", () => {
       expect(getFundingHistory).toHaveBeenCalledWith("11111111111111111111111111111111", 500);
     });
 
-    it("should clamp limit to max 1000", async () => {
+    it("should clamp limit to max 500 (PERC-8178)", async () => {
       vi.mocked(getFundingHistory).mockResolvedValue([]);
 
       const app = fundingRoutes();
       await app.request("/funding/11111111111111111111111111111111/history?limit=5000");
 
-      expect(getFundingHistory).toHaveBeenCalledWith("11111111111111111111111111111111", 1000);
+      expect(getFundingHistory).toHaveBeenCalledWith("11111111111111111111111111111111", 500);
     });
 
-    it("should use since parameter when provided", async () => {
+    it("should use since parameter when provided (ISO 8601)", async () => {
       vi.mocked(getFundingHistorySince).mockResolvedValue([]);
 
       const app = fundingRoutes();
       await app.request("/funding/11111111111111111111111111111111/history?since=2025-01-01T00:00:00Z");
 
-      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2025-01-01T00:00:00Z");
+      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2025-01-01T00:00:00.000Z");
+    });
+
+    it("should accept unix epoch seconds as since param (PERC-8178)", async () => {
+      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+      const app = fundingRoutes();
+      // 1704067200 = 2024-01-01T00:00:00Z
+      await app.request("/funding/11111111111111111111111111111111/history?since=1704067200");
+
+      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2024-01-01T00:00:00.000Z");
+    });
+
+    it("should accept unix epoch milliseconds as since param (PERC-8178)", async () => {
+      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+      const app = fundingRoutes();
+      // 1704067200000 = 2024-01-01T00:00:00Z
+      await app.request("/funding/11111111111111111111111111111111/history?since=1704067200000");
+
+      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2024-01-01T00:00:00.000Z");
+    });
+
+    it("should return 400 for invalid since param (PERC-8178)", async () => {
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111/history?since=not-a-date");
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toContain("Invalid since parameter");
+    });
+
+    it("should return 400 for since param with year out of range (PERC-8178)", async () => {
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111/history?since=1900-01-01T00:00:00Z");
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toContain("Invalid since parameter");
+    });
+
+    it("should cap results at 500 rows when using since (PERC-8178)", async () => {
+      // Return 600 rows from the DB
+      const bigHistory = Array.from({ length: 600 }, (_, i) => ({
+        timestamp: `2025-01-01T00:${String(i).padStart(2, "0")}:00Z`,
+        slot: 100000 + i,
+        rate_bps_per_slot: 5,
+        net_lp_pos: "0",
+        price_e6: 50000000000,
+        funding_index_qpb_e6: "0",
+      }));
+      vi.mocked(getFundingHistorySince).mockResolvedValue(bigHistory);
+
+      const app = fundingRoutes();
+      const res = await app.request("/funding/11111111111111111111111111111111/history?since=2025-01-01T00:00:00Z");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.count).toBe(500);
+      expect(data.history).toHaveLength(500);
     });
 
     it("should return 400 for invalid slab", async () => {
