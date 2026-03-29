@@ -5,6 +5,8 @@ import { statsRoutes } from "../../src/routes/stats.js";
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
   getConnection: vi.fn(),
+  getNetwork: vi.fn(() => "devnet" as const),
+  truncateErrorMessage: vi.fn((msg: unknown, _limit?: number) => String(msg ?? "")),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -23,15 +25,36 @@ vi.mock("@percolator/shared", () => ({
 
 const { getSupabase } = await import("@percolator/shared");
 
+/**
+ * Create a chainable Supabase query-builder mock that resolves to `resolvedValue`.
+ * All filter methods (eq, gte, not, etc.) return the same chainable object so
+ * the test doesn't need to know the exact chain the production code uses.
+ */
+function chainable(resolvedValue: any): any {
+  const obj: any = {};
+  const methods = ["select", "eq", "neq", "gte", "lte", "not", "order", "limit", "single", "maybeSingle", "head"];
+  for (const m of methods) {
+    obj[m] = vi.fn(() => obj);
+  }
+  // Make the object thenable so awaiting it returns resolvedValue
+  obj.then = (resolve: any) => Promise.resolve(resolvedValue).then(resolve);
+  obj.catch = (reject: any) => Promise.resolve(resolvedValue).catch(reject);
+  obj.finally = (fn: any) => Promise.resolve(resolvedValue).finally(fn);
+  return obj;
+}
+
 describe("stats routes", () => {
   let mockSupabase: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
 
+    // Create a chainable mock that supports the full Supabase query builder pattern.
+    // All filter/modifier methods return `mockSupabase` to allow arbitrary chaining.
     mockSupabase = {
       from: vi.fn(() => mockSupabase),
       select: vi.fn(() => mockSupabase),
+      eq: vi.fn(() => mockSupabase),
       gte: vi.fn(() => mockSupabase),
     };
 
@@ -42,12 +65,7 @@ describe("stats routes", () => {
     it("should return aggregated platform stats", async () => {
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets") {
-          return {
-            select: vi.fn().mockResolvedValue({ 
-              count: 10, 
-              error: null 
-            }),
-          };
+          return chainable({ count: 10, error: null });
         } else if (table === "market_stats") {
           return {
             select: vi.fn().mockResolvedValue({
@@ -59,14 +77,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ 
-                count: 1250, 
-                error: null 
-              }),
-            })),
-          };
+          return chainable({ count: 1250, error: null });
         }
         return mockSupabase;
       });
@@ -77,23 +88,16 @@ describe("stats routes", () => {
         if (table === "markets") {
           marketsCalls++;
           if (marketsCalls === 1) {
-            return {
-              select: vi.fn().mockResolvedValue({ 
-                count: 10, 
-                error: null 
-              }),
-            };
+            return chainable({ count: 10, error: null });
           } else {
-            return {
-              select: vi.fn().mockResolvedValue({
-                data: [
-                  { deployer: "Deployer11111111111111111111111111" },
-                  { deployer: "Deployer22222222222222222222222222" },
-                  { deployer: "Deployer11111111111111111111111111" }, // Duplicate
-                ],
-                error: null,
-              }),
-            };
+            return chainable({
+              data: [
+                { deployer: "Deployer11111111111111111111111111" },
+                { deployer: "Deployer22222222222222222222222222" },
+                { deployer: "Deployer11111111111111111111111111" }, // Duplicate
+              ],
+              error: null,
+            });
           }
         } else if (table === "market_stats") {
           return {
@@ -106,14 +110,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ 
-                count: 1250, 
-                error: null 
-              }),
-            })),
-          };
+          return chainable({ count: 1250, error: null });
         }
         return mockSupabase;
       });
@@ -133,12 +130,7 @@ describe("stats routes", () => {
     it("should handle BigInt aggregation correctly", async () => {
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets") {
-          return {
-            select: vi.fn().mockResolvedValue({ 
-              count: 3, 
-              error: null 
-            }),
-          };
+          return chainable({ count: 3, error: null });
         } else if (table === "market_stats") {
           return {
             select: vi.fn().mockResolvedValue({
@@ -150,14 +142,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ 
-                count: 0, 
-                error: null 
-              }),
-            })),
-          };
+          return chainable({ count: 0, error: null });
         }
         return mockSupabase;
       });
@@ -167,19 +152,12 @@ describe("stats routes", () => {
         if (table === "markets") {
           marketsCalls++;
           if (marketsCalls === 1) {
-            return {
-              select: vi.fn().mockResolvedValue({ 
-                count: 3, 
-                error: null 
-              }),
-            };
+            return chainable({ count: 3, error: null });
           } else {
-            return {
-              select: vi.fn().mockResolvedValue({
-                data: [{ deployer: "Deployer11111111111111111111111111" }],
-                error: null,
-              }),
-            };
+            return chainable({
+              data: [{ deployer: "Deployer11111111111111111111111111" }],
+              error: null,
+            });
           }
         } else if (table === "market_stats") {
           return {
@@ -192,14 +170,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ 
-                count: 0, 
-                error: null 
-              }),
-            })),
-          };
+          return chainable({ count: 0, error: null });
         }
         return mockSupabase;
       });
@@ -216,12 +187,7 @@ describe("stats routes", () => {
     it("should handle zero values", async () => {
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets") {
-          return {
-            select: vi.fn().mockResolvedValue({ 
-              count: 0, 
-              error: null 
-            }),
-          };
+          return chainable({ count: 0, error: null });
         } else if (table === "market_stats") {
           return {
             select: vi.fn().mockResolvedValue({
@@ -230,14 +196,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ 
-                count: 0, 
-                error: null 
-              }),
-            })),
-          };
+          return chainable({ count: 0, error: null });
         }
         return mockSupabase;
       });
@@ -247,19 +206,12 @@ describe("stats routes", () => {
         if (table === "markets") {
           marketsCalls++;
           if (marketsCalls === 1) {
-            return {
-              select: vi.fn().mockResolvedValue({ 
-                count: 0, 
-                error: null 
-              }),
-            };
+            return chainable({ count: 0, error: null });
           } else {
-            return {
-              select: vi.fn().mockResolvedValue({
-                data: [],
-                error: null,
-              }),
-            };
+            return chainable({
+              data: [],
+              error: null,
+            });
           }
         } else if (table === "market_stats") {
           return {
@@ -269,14 +221,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ 
-                count: 0, 
-                error: null 
-              }),
-            })),
-          };
+          return chainable({ count: 0, error: null });
         }
         return mockSupabase;
       });
@@ -296,12 +241,7 @@ describe("stats routes", () => {
     it("should handle null values in stats", async () => {
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets") {
-          return {
-            select: vi.fn().mockResolvedValue({ 
-              count: 2, 
-              error: null 
-            }),
-          };
+          return chainable({ count: 2, error: null });
         } else if (table === "market_stats") {
           return {
             select: vi.fn().mockResolvedValue({
@@ -313,14 +253,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ 
-                count: 100, 
-                error: null 
-              }),
-            })),
-          };
+          return chainable({ count: 100, error: null });
         }
         return mockSupabase;
       });
@@ -330,19 +263,12 @@ describe("stats routes", () => {
         if (table === "markets") {
           marketsCalls++;
           if (marketsCalls === 1) {
-            return {
-              select: vi.fn().mockResolvedValue({ 
-                count: 2, 
-                error: null 
-              }),
-            };
+            return chainable({ count: 2, error: null });
           } else {
-            return {
-              select: vi.fn().mockResolvedValue({
-                data: [{ deployer: "Deployer11111111111111111111111111" }],
-                error: null,
-              }),
-            };
+            return chainable({
+              data: [{ deployer: "Deployer11111111111111111111111111" }],
+              error: null,
+            });
           }
         } else if (table === "market_stats") {
           return {
@@ -355,14 +281,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ 
-                count: 100, 
-                error: null 
-              }),
-            })),
-          };
+          return chainable({ count: 100, error: null });
         }
         return mockSupabase;
       });
@@ -377,33 +296,8 @@ describe("stats routes", () => {
     });
 
     it("should return response with all expected shape fields", async () => {
-      // Explicitly verify the response contract includes all required fields
-      mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "markets") {
-          let callsMarkets = 0;
-          return {
-            select: vi.fn().mockImplementation(() => {
-              callsMarkets++;
-              if (callsMarkets === 1) return Promise.resolve({ count: 5, error: null });
-              return Promise.resolve({ data: [{ deployer: "D1" }], error: null });
-            }),
-          };
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
-              data: [{ volume_24h: "100000", total_open_interest: "500000" }],
-              error: null,
-            }),
-          };
-        } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ count: 10, error: null }),
-            })),
-          };
-        }
-        return mockSupabase;
-      });
+      // Explicitly verify the response contract includes all required fields.
+      // (This first mockImplementation is immediately overridden below.)
 
       // Override with proper multi-call behavior
       let marketsCalls = 0;
@@ -411,9 +305,9 @@ describe("stats routes", () => {
         if (table === "markets") {
           marketsCalls++;
           if (marketsCalls === 1) {
-            return { select: vi.fn().mockResolvedValue({ count: 5, error: null }) };
+            return chainable({ count: 5, error: null });
           }
-          return { select: vi.fn().mockResolvedValue({ data: [{ deployer: "D1" }], error: null }) };
+          return chainable({ data: [{ deployer: "D1" }], error: null });
         } else if (table === "market_stats") {
           return {
             select: vi.fn().mockResolvedValue({
@@ -422,11 +316,7 @@ describe("stats routes", () => {
             }),
           };
         } else if (table === "trades") {
-          return {
-            select: vi.fn(() => ({
-              gte: vi.fn().mockResolvedValue({ count: 10, error: null }),
-            })),
-          };
+          return chainable({ count: 10, error: null });
         }
         return mockSupabase;
       });
@@ -453,14 +343,8 @@ describe("stats routes", () => {
     });
 
     it("should handle database errors", async () => {
-      mockSupabase.from.mockImplementation((table: string) => {
-        return {
-          select: vi.fn().mockResolvedValue({ 
-            count: null, 
-            data: null,
-            error: new Error("Database error") 
-          }),
-        };
+      mockSupabase.from.mockImplementation((_table: string) => {
+        return chainable({ count: null, data: null, error: new Error("Database error") });
       });
 
       const app = statsRoutes();
