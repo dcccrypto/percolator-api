@@ -4,7 +4,7 @@ import { validateSlab } from "../middleware/validateSlab.js";
 import { cacheMiddleware } from "../middleware/cache.js";
 import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine } from "@percolator/sdk";
-import { getConnection, getSupabase, getNetwork, createLogger, sanitizeSlabAddress } from "@percolator/shared";
+import { getConnection, getSupabase, getNetwork, createLogger, sanitizeSlabAddress, truncateErrorMessage } from "@percolator/shared";
 
 const logger = createLogger("api:markets");
 
@@ -104,6 +104,9 @@ export function marketRoutes(): Hono {
       if (error) throw error;
       return c.json({ stats: data ?? [] });
     } catch (err) {
+      logger.error("Error fetching all market stats", {
+        error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120),
+      });
       return c.json({ error: "Failed to fetch market stats" }, 500);
     }
   });
@@ -120,6 +123,10 @@ export function marketRoutes(): Hono {
       if (error && error.code !== "PGRST116") throw error;
       return c.json({ stats: data ?? null });
     } catch (err) {
+      logger.error("Error fetching market stats", {
+        slab,
+        error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120),
+      });
       return c.json({ error: "Failed to fetch market stats" }, 500);
     }
   });

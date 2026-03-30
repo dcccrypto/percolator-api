@@ -158,14 +158,10 @@ export function chartRoutes(): Hono {
     // Parse query params — validate timeframe against explicit allowlist
     const timeframe = parseTimeframe(c.req.query("timeframe"));
     const defaultAggregate = timeframe === "minute" ? "5" : "1";
-    const aggregate = Math.max(
-      1,
-      parseInt(c.req.query("aggregate") ?? defaultAggregate, 10)
-    );
-    const limit = Math.min(
-      500,
-      Math.max(1, parseInt(c.req.query("limit") ?? "168", 10))
-    );
+    const rawAggregate = parseInt(c.req.query("aggregate") ?? defaultAggregate, 10);
+    const aggregate = Math.max(1, Number.isNaN(rawAggregate) ? 1 : rawAggregate);
+    const rawLimit = parseInt(c.req.query("limit") ?? "168", 10);
+    const limit = Math.min(500, Math.max(1, Number.isNaN(rawLimit) ? 168 : rawLimit));
 
     const cacheKey = `${mint}:${timeframe}:${aggregate}:${limit}`;
     const hit = cache.get(cacheKey);
