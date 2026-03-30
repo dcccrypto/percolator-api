@@ -64,12 +64,14 @@ export function statsRoutes(): Hono {
       const uniqueDeployers = new Set((deployers ?? []).map((d) => d.deployer)).size;
 
       // Count 24h trades — filter by network
+      // NOTE: trades table uses `created_at` (TIMESTAMPTZ), not `timestamp`.
+      // The `timestamp` column exists only on oracle_prices/funding_history/oi_history.
       const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { count: trades24h, error: tradesError } = await getSupabase()
         .from("trades")
         .select("*", { count: "exact", head: true })
         .eq("network", network)
-        .gte("timestamp", since24h);
+        .gte("created_at", since24h);
 
       if (tradesError) throw tradesError;
 
