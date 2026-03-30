@@ -11,6 +11,7 @@ vi.mock("@percolator/shared", () => ({
     error: vi.fn(),
     debug: vi.fn(),
   })),
+  truncateErrorMessage: vi.fn((msg: string) => msg),
   sanitizeSlabAddress: vi.fn((addr: string) => addr),
   sanitizePagination: vi.fn((p: any) => p),
   sanitizeString: vi.fn((s: string) => s),

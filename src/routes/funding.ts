@@ -249,6 +249,12 @@ export function fundingRoutes(): Hono {
 
     const MAX_ROWS = 500;
 
+    // Parse and validate `limit` — guard against NaN from non-numeric input
+    const parsedLimit = limitParam ? parseInt(limitParam, 10) : 100;
+    const limit = Number.isNaN(parsedLimit) || parsedLimit <= 0
+      ? 100
+      : Math.min(parsedLimit, MAX_ROWS);
+
     // Parse and validate `since` — accepts ISO 8601 or unix epoch (same logic as /history)
     let validatedSince: string;
     const epochNum = Number(sinceParam);
@@ -272,8 +278,6 @@ export function fundingRoutes(): Hono {
       }
       validatedSince = d.toISOString();
     }
-
-    const limit = limitParam ? Math.min(parseInt(limitParam, 10), MAX_ROWS) : 100;
 
     try {
       let history = await getFundingHistorySince(slab, validatedSince);
@@ -339,7 +343,10 @@ export function fundingRoutes(): Hono {
 
     try {
       let history;
-      const limit = limitParam ? Math.min(parseInt(limitParam, 10), MAX_ROWS) : 100;
+      const parsedHistLimit = limitParam ? parseInt(limitParam, 10) : 100;
+      const limit = (Number.isNaN(parsedHistLimit) || parsedHistLimit <= 0)
+        ? 100
+        : Math.min(parsedHistLimit, MAX_ROWS);
 
       if (sinceParam) {
         // PERC-8178: Validate sinceParam as ISO 8601 timestamp or unix epoch (seconds/ms)
