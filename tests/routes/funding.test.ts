@@ -22,6 +22,8 @@ vi.mock("@percolator/shared", () => ({
   sendWarningAlert: vi.fn(),
   eventBus: { on: vi.fn(), emit: vi.fn(), off: vi.fn() },
   config: { supabaseUrl: "http://test", supabaseKey: "test", rpcUrl: "http://test" },
+  truncateErrorMessage: vi.fn((msg: string) => msg),
+  isBlockedSlab: vi.fn(() => false),
 }));
 
 const { getFundingHistory, getFundingHistorySince, getSupabase } = 
@@ -549,4 +551,199 @@ describe("funding routes", () => {
       });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // GH#36: GET /funding/:slab/historySince
+  // ---------------------------------------------------------------------------
+  describe("GET /funding/:slab/historySince", () => {
+    const VALID_SLAB = "11111111111111111111111111111111";
+    const VALID_SINCE = "2025-01-01T00:00:00Z";
+
+    const mockRow = {
+      timestamp: "2025-01-01T01:00:00Z",
+      slot: 123456,
+      rate_bps_per_slot: 5,
+      net_lp_pos: "1000000",
+      price_e6: 150000000,
+      funding_index_qpb_e6: "987654321",
+    };
+
+    it("returns 400 when since param is missing", async () => {
+      const app = fundingRoutes();
+      const res = await app.request(`/funding/${VALID_SLAB}/historySince`);
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toMatch(/missing required query parameter/i);
+      expect(data.hint).toBeDefined();
+    });
+
+    it("returns 400 for invalid ISO timestamp", async () => {
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=not-a-date`
+      );
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toMatch(/invalid since parameter/i);
+    });
+
+    it("returns 400 for since with year out of range", async () => {
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=1900-01-01T00:00:00Z`
+      );
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toMatch(/invalid since parameter/i);
+    });
+
+    it("returns 400 for invalid slab address", async () => {
+      const app = fundingRoutes();
+      const res = await app.request(`/funding/invalid/historySince?since=${VALID_SINCE}`);
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toBe("Invalid slab address");
+    });
+
+    it("returns history records for valid slab and since (ISO 8601)", async () => {
+      vi.mocked(getFundingHistorySince).mockResolvedValue([mockRow] as any);
+
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=${VALID_SINCE}`
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.slabAddress).toBe(VALID_SLAB);
+      expect(data.since).toBe(new Date(VALID_SINCE).toISOString());
+      expect(data.count).toBe(1);
+      expect(data.history).toHaveLength(1);
+      expect(data.history[0]).toMatchObject({
+        timestamp: mockRow.timestamp,
+        slot: mockRow.slot,
+        rateBpsPerSlot: mockRow.rate_bps_per_slot,
+        netLpPos: mockRow.net_lp_pos,
+        priceE6: mockRow.price_e6,
+        fundingIndexQpbE6: mockRow.funding_index_qpb_e6,
+      });
+      expect(vi.mocked(getFundingHistorySince)).toHaveBeenCalledWith(
+        VALID_SLAB,
+        new Date(VALID_SINCE).toISOString()
+      );
+    });
+
+    it("accepts unix epoch seconds as since param", async () => {
+      vi.mocked(getFundingHistorySince).mockResolvedValue([mockRow] as any);
+
+      const epochSeconds = Math.floor(new Date(VALID_SINCE).getTime() / 1000);
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=${epochSeconds}`
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.since).toBe(new Date(VALID_SINCE).toISOString());
+    });
+
+    it("accepts unix epoch milliseconds as since param", async () => {
+      vi.mocked(getFundingHistorySince).mockResolvedValue([mockRow] as any);
+
+      const epochMs = new Date(VALID_SINCE).getTime();
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=${epochMs}`
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.since).toBe(new Date(VALID_SINCE).toISOString());
+    });
+
+    it("returns empty history when no records exist", async () => {
+      vi.mocked(getFundingHistorySince).mockResolvedValue([]);
+
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=${VALID_SINCE}`
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.count).toBe(0);
+      expect(data.history).toHaveLength(0);
+    });
+
+    it("caps results at default limit of 100 rows", async () => {
+      const manyRows = Array.from({ length: 600 }, (_, i) => ({
+        ...mockRow,
+        slot: 100000 + i,
+      }));
+      vi.mocked(getFundingHistorySince).mockResolvedValue(manyRows as any);
+
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=${VALID_SINCE}`
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.history).toHaveLength(100);
+    });
+
+    it("respects custom limit param", async () => {
+      const manyRows = Array.from({ length: 300 }, (_, i) => ({
+        ...mockRow,
+        slot: 100000 + i,
+      }));
+      vi.mocked(getFundingHistorySince).mockResolvedValue(manyRows as any);
+
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=${VALID_SINCE}&limit=50`
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.history).toHaveLength(50);
+    });
+
+    it("clamps limit to max 500", async () => {
+      const manyRows = Array.from({ length: 600 }, (_, i) => ({
+        ...mockRow,
+        slot: 100000 + i,
+      }));
+      vi.mocked(getFundingHistorySince).mockResolvedValue(manyRows as any);
+
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=${VALID_SINCE}&limit=9999`
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.history).toHaveLength(500);
+    });
+
+    it("returns 500 on DB error", async () => {
+      vi.mocked(getFundingHistorySince).mockRejectedValue(
+        new Error("DB connection failed")
+      );
+
+      const app = fundingRoutes();
+      const res = await app.request(
+        `/funding/${VALID_SLAB}/historySince?since=${VALID_SINCE}`
+      );
+
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error).toBe("Failed to fetch funding history");
+    });
+  });
+
 });
