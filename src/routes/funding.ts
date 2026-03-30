@@ -214,6 +214,113 @@ export function fundingRoutes(): Hono {
   });
 
   /**
+   * GET /funding/:slab/historySince
+   *
+   * Returns funding rate history starting from a required `since` timestamp.
+   * Referenced by the frontend funding history chart.
+   *
+   * Query params:
+   * - since (required): ISO 8601 timestamp or unix epoch (seconds or ms).
+   *   Returns all records with timestamp >= since, up to MAX_ROWS.
+   * - limit (optional): max records to return (default 100, cap 500)
+   *
+   * Returns 400 if `since` is missing or invalid.
+   * Returns 404 if the slab does not exist in market_stats.
+   *
+   * GH#36
+   */
+  app.get("/funding/:slab/historySince", validateSlab, async (c) => {
+    const slab = c.req.param("slab");
+    if (!slab) return c.json({ error: "slab required" }, 400);
+
+    const sinceParam = c.req.query("since");
+    const limitParam = c.req.query("limit");
+
+    // `since` is required for this endpoint
+    if (!sinceParam) {
+      return c.json(
+        {
+          error: "Missing required query parameter: since",
+          hint: "Provide an ISO 8601 timestamp or unix epoch (seconds/ms), e.g. ?since=2025-01-01T00:00:00Z",
+        },
+        400
+      );
+    }
+
+    const MAX_ROWS = 500;
+
+    // Parse and validate `since` — accepts ISO 8601 or unix epoch (same logic as /history)
+    let validatedSince: string;
+    const epochNum = Number(sinceParam);
+    if (!Number.isNaN(epochNum) && epochNum > 0) {
+      // Unix epoch — treat >1e12 as milliseconds, otherwise seconds
+      const ms = epochNum > 1e12 ? epochNum : epochNum * 1000;
+      const d = new Date(ms);
+      if (Number.isNaN(d.getTime()) || d.getFullYear() < 2020 || d.getFullYear() > 2100) {
+        return c.json({ error: "Invalid since parameter: epoch out of range" }, 400);
+      }
+      validatedSince = d.toISOString();
+    } else {
+      const d = new Date(sinceParam);
+      if (Number.isNaN(d.getTime()) || d.getFullYear() < 2020 || d.getFullYear() > 2100) {
+        return c.json(
+          {
+            error: "Invalid since parameter: expected ISO 8601 timestamp or unix epoch",
+          },
+          400
+        );
+      }
+      validatedSince = d.toISOString();
+    }
+
+    const limit = limitParam ? Math.min(parseInt(limitParam, 10), MAX_ROWS) : 100;
+
+    try {
+      let history = await getFundingHistorySince(slab, validatedSince);
+
+      // Enforce row cap
+      if (history.length > limit) {
+        history = history.slice(0, limit);
+      }
+
+      return c.json({
+        slabAddress: slab,
+        since: validatedSince,
+        count: history.length,
+        history: history.map((h) => ({
+          timestamp: h.timestamp,
+          slot: h.slot,
+          rateBpsPerSlot: h.rate_bps_per_slot,
+          netLpPos: h.net_lp_pos,
+          priceE6: h.price_e6,
+          fundingIndexQpbE6: h.funding_index_qpb_e6,
+        })),
+      });
+    } catch (err) {
+      logger.error("Error fetching funding historySince", {
+        slab,
+        since: validatedSince,
+        error: truncateErrorMessage(
+          err instanceof Error ? err.message : String(err),
+          120
+        ),
+      });
+      return c.json(
+        {
+          error: "Failed to fetch funding history",
+          ...(process.env.NODE_ENV !== "production" && {
+            details: truncateErrorMessage(
+              err instanceof Error ? err.message : String(err),
+              200
+            ),
+          }),
+        },
+        500
+      );
+    }
+  });
+
+  /**
    * GET /funding/:slab/history
    * 
    * Returns historical funding rate data with optional time range.
