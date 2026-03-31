@@ -17,7 +17,7 @@ info:
     
     ## Rate Limits
     - Read endpoints: 100 requests/minute
-    - Write endpoints: 20 requests/minute
+    - Write endpoints: 10 requests/minute
     
     ## Caching
     Most endpoints implement response caching with varying TTLs (10-60 seconds) to optimize performance.
