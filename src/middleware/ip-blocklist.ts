@@ -1,4 +1,5 @@
 import type { Context, Next } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { createLogger } from "@percolator/shared";
 
 const logger = createLogger("api:ip-blocklist");
@@ -83,7 +84,10 @@ function isBlocked(clientIp: string): boolean {
 
 function getClientIp(c: Context): string {
   if (PROXY_DEPTH === 0) {
-    return c.req.header("x-real-ip") ?? "unknown";
+    // No trusted proxy: ignore all forwarded headers, use socket address.
+    // x-real-ip is client-spoofable and must not be trusted without a proxy.
+    const info = getConnInfo(c);
+    return info.remote.address ?? "unknown";
   }
   const forwarded = c.req.header("x-forwarded-for");
   if (forwarded) {
