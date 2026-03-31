@@ -29,6 +29,15 @@ import { cacheMiddleware } from "./middleware/cache.js";
 
 const logger = createLogger("api");
 
+const validNodeEnvs = ["production", "development", "test"];
+if (process.env.NODE_ENV && !validNodeEnvs.includes(process.env.NODE_ENV)) {
+  logger.error("Invalid NODE_ENV configuration", {
+    nodeEnv: process.env.NODE_ENV,
+    validOptions: validNodeEnvs.join(", ")
+  });
+  throw new Error(`Invalid NODE_ENV: ${process.env.NODE_ENV}. Must be one of: ${validNodeEnvs.join(", ")}`);
+}
+
 const app = new Hono();
 
 // CORS Configuration
@@ -193,16 +202,6 @@ app.onError((err, c) => {
     ...(showDetails && { details: truncateErrorMessage(err.message, 200) })
   }, 500);
 });
-
-// Validate NODE_ENV at startup
-const validNodeEnvs = ["production", "development", "test"];
-if (process.env.NODE_ENV && !validNodeEnvs.includes(process.env.NODE_ENV)) {
-  logger.error("Invalid NODE_ENV configuration", {
-    nodeEnv: process.env.NODE_ENV,
-    validOptions: validNodeEnvs.join(", ")
-  });
-  throw new Error(`Invalid NODE_ENV: ${process.env.NODE_ENV}. Must be one of: ${validNodeEnvs.join(", ")}`);
-}
 
 const port = Number(process.env.API_PORT ?? 3001);
 
