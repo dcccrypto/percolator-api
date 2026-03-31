@@ -513,14 +513,14 @@ export function setupWebSocket(server: Server): WebSocketServer {
     // H2: Reject if at max connections
     if (clients.size >= MAX_WS_CONNECTIONS) {
       logger.warn("Max global WS connections reached", { ip: clientIp });
-      ws.close(1008, "Max connections reached"); // 1008 = Policy Violation
+      ws.close(1008, "Connection limit reached");
       return;
     }
     
     // Reject IPs temporarily banned for repeated auth failures (issue #839)
     if (isAuthBanned(clientIp)) {
       logger.warn("Rejected connection from auth-banned IP", { ip: clientIp });
-      ws.close(1008, "Too many authentication failures — try again later");
+      ws.close(1008, "Too many failed attempts — try again later");
       return;
     }
 
@@ -552,7 +552,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
     if (authenticated) {
       if (ipConnections >= MAX_CONNECTIONS_PER_IP) {
         logger.warn("Max authenticated connections per IP reached", { ip: clientIp, count: ipConnections });
-        ws.close(1008, `Max ${MAX_CONNECTIONS_PER_IP} connections per IP`);
+        ws.close(1008, "Connection limit reached");
         return;
       }
       connectionsPerIp.set(clientIp, ipConnections + 1);
@@ -560,7 +560,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
       const unauthCount = unauthenticatedConnectionsPerIp.get(clientIp) || 0;
       if (unauthCount >= MAX_UNAUTHENTICATED_CONNECTIONS_PER_IP) {
         logger.warn("Max unauthenticated connections per IP reached", { ip: clientIp, count: unauthCount });
-        ws.close(1008, `Max ${MAX_UNAUTHENTICATED_CONNECTIONS_PER_IP} unauthenticated connections per IP`);
+        ws.close(1008, "Connection limit reached");
         return;
       }
       unauthenticatedConnectionsPerIp.set(clientIp, unauthCount + 1);
@@ -592,7 +592,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
           logger.warn("Client failed to authenticate within timeout", { ip: clientIp });
           // Record auth failure for rate limiting (issue #839: flood protection)
           recordAuthFailure(clientIp);
-          ws.close(1008, "Authentication timeout");
+          ws.close(1008, "Authentication required");
         }
       }, AUTH_TIMEOUT_MS);
     }
