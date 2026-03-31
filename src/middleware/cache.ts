@@ -14,6 +14,8 @@ interface CacheEntry {
   headers: Record<string, string>;
 }
 
+const MAX_CACHE_ENTRIES = 500;
+
 class ResponseCache {
   private cache = new Map<string, CacheEntry>();
   
@@ -26,11 +28,22 @@ class ResponseCache {
       this.cache.delete(key);
       return null;
     }
+
+    // Move to end for LRU ordering (Map preserves insertion order)
+    this.cache.delete(key);
+    this.cache.set(key, entry);
     
     return entry;
   }
   
   set(key: string, body: string, headers: Record<string, string>): CacheEntry {
+    // Evict least-recently-used entries when at capacity
+    while (this.cache.size >= MAX_CACHE_ENTRIES) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
+      else break;
+    }
+
     const etag = `"${createHash("md5").update(body).digest("hex")}"`;
     const entry: CacheEntry = {
       body,

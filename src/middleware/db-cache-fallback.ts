@@ -20,6 +20,8 @@ const dbCache = new Map<string, CachedResponse>();
 // Maximum age for stale cache (1 hour)
 const MAX_STALE_AGE_MS = 60 * 60 * 1000;
 
+const MAX_DB_CACHE_ENTRIES = 200;
+
 /**
  * Execute a database query with cache fallback.
  * If the query fails, return cached data if available (even if stale).
@@ -38,6 +40,13 @@ export async function withDbCacheFallback<T>(
     // Try the query
     const result = await queryFn();
     
+    // Evict oldest entries when at capacity
+    while (dbCache.size >= MAX_DB_CACHE_ENTRIES) {
+      const oldest = dbCache.keys().next().value;
+      if (oldest !== undefined) dbCache.delete(oldest);
+      else break;
+    }
+
     // Cache successful result
     dbCache.set(cacheKey, {
       data: result,
