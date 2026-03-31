@@ -185,14 +185,11 @@ export function chartRoutes(): Hono {
     // Cache
     cache.set(cacheKey, { candles, poolAddress, fetchedAt: Date.now() });
 
-    // Evict oldest entries when over limit
-    if (cache.size > CACHE_MAX_SIZE) {
-      const oldest = [...cache.entries()].sort(
-        (a, b) => a[1].fetchedAt - b[1].fetchedAt
-      );
-      for (let i = 0; i < 10 && i < oldest.length; i++) {
-        cache.delete(oldest[i][0]);
-      }
+    // Evict oldest entries when over limit (Map iteration order = insertion order)
+    while (cache.size > CACHE_MAX_SIZE) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey) cache.delete(oldestKey);
+      else break;
     }
 
     return c.json(
