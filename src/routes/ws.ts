@@ -350,35 +350,39 @@ function removeClientFromSlab(client: WsClient, slabAddress: string): void {
  * Broadcast batched price update for a slab
  */
 function flushPriceUpdate(slabAddress: string): void {
-  const pending = pendingPriceUpdates.get(slabAddress);
-  if (!pending) return;
-  
-  pendingPriceUpdates.delete(slabAddress);
-  priceUpdateTimers.delete(slabAddress);
-  
-  const channel = `price:${slabAddress}`;
-  const msg = JSON.stringify({
-    type: "price",
-    slab: slabAddress,
-    price: pending.data.priceE6 / 1_000_000,
-    markPrice: pending.data.markPriceE6 ? pending.data.markPriceE6 / 1_000_000 : undefined,
-    indexPrice: pending.data.indexPriceE6 ? pending.data.indexPriceE6 / 1_000_000 : undefined,
-    timestamp: pending.timestamp,
-  });
-  
-  const slabClients = connectionsPerSlab.get(slabAddress);
-  if (!slabClients) return;
-  
-  for (const client of slabClients) {
-    if (
-      client.ws.readyState === WebSocket.OPEN &&
-      client.subscriptions.has(channel)
-    ) {
-      if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
-      client.ws.send(msg);
-      metrics.messagesSent++;
-      metrics.bytesSent += msg.length;
+  try {
+    const pending = pendingPriceUpdates.get(slabAddress);
+    if (!pending) return;
+    
+    pendingPriceUpdates.delete(slabAddress);
+    priceUpdateTimers.delete(slabAddress);
+    
+    const channel = `price:${slabAddress}`;
+    const msg = JSON.stringify({
+      type: "price",
+      slab: slabAddress,
+      price: pending.data.priceE6 / 1_000_000,
+      markPrice: pending.data.markPriceE6 ? pending.data.markPriceE6 / 1_000_000 : undefined,
+      indexPrice: pending.data.indexPriceE6 ? pending.data.indexPriceE6 / 1_000_000 : undefined,
+      timestamp: pending.timestamp,
+    });
+    
+    const slabClients = connectionsPerSlab.get(slabAddress);
+    if (!slabClients) return;
+    
+    for (const client of slabClients) {
+      if (
+        client.ws.readyState === WebSocket.OPEN &&
+        client.subscriptions.has(channel)
+      ) {
+        if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
+        client.ws.send(msg);
+        metrics.messagesSent++;
+        metrics.bytesSent += msg.length;
+      }
     }
+  } catch (err) {
+    logger.error("Error in flushPriceUpdate", { slabAddress, error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -437,64 +441,67 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
   // Broadcast trade events to subscribed clients
   eventBus.on("trade.executed", (payload: any) => {
-    const slabAddress = payload.slabAddress;
-    const channel = `trades:${slabAddress}`;
-    
-    // Check if anyone is subscribed
-    const slabClients = connectionsPerSlab.get(slabAddress);
-    if (!slabClients || slabClients.size === 0) {
-      return;
-    }
-    
-    const msg = JSON.stringify({
-      type: "trade",
-      slab: slabAddress,
-      side: payload.data.side,
-      size: payload.data.size,
-      price: payload.data.price,
-      timestamp: payload.timestamp,
-    });
+    try {
+      const slabAddress = payload.slabAddress;
+      const channel = `trades:${slabAddress}`;
+      
+      const slabClients = connectionsPerSlab.get(slabAddress);
+      if (!slabClients || slabClients.size === 0) return;
+      
+      const msg = JSON.stringify({
+        type: "trade",
+        slab: slabAddress,
+        side: payload.data.side,
+        size: payload.data.size,
+        price: payload.data.price,
+        timestamp: payload.timestamp,
+      });
 
-    for (const client of slabClients) {
-      if (
-        client.ws.readyState === WebSocket.OPEN &&
-        client.subscriptions.has(channel)
-      ) {
-        if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
-        client.ws.send(msg);
-        metrics.messagesSent++;
-        metrics.bytesSent += msg.length;
+      for (const client of slabClients) {
+        if (
+          client.ws.readyState === WebSocket.OPEN &&
+          client.subscriptions.has(channel)
+        ) {
+          if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
+          client.ws.send(msg);
+          metrics.messagesSent++;
+          metrics.bytesSent += msg.length;
+        }
       }
+    } catch (err) {
+      logger.error("Error in trade.executed handler", { error: err instanceof Error ? err.message : String(err) });
     }
   });
 
   // Broadcast funding rate updates to subscribed clients
   eventBus.on("funding.updated", (payload: any) => {
-    const slabAddress = payload.slabAddress;
-    const channel = `funding:${slabAddress}`;
-    
-    const slabClients = connectionsPerSlab.get(slabAddress);
-    if (!slabClients || slabClients.size === 0) {
-      return;
-    }
-    
-    const msg = JSON.stringify({
-      type: "funding",
-      slab: slabAddress,
-      rate: payload.data.rate,
-      timestamp: payload.timestamp,
-    });
+    try {
+      const slabAddress = payload.slabAddress;
+      const channel = `funding:${slabAddress}`;
+      
+      const slabClients = connectionsPerSlab.get(slabAddress);
+      if (!slabClients || slabClients.size === 0) return;
+      
+      const msg = JSON.stringify({
+        type: "funding",
+        slab: slabAddress,
+        rate: payload.data.rate,
+        timestamp: payload.timestamp,
+      });
 
-    for (const client of slabClients) {
-      if (
-        client.ws.readyState === WebSocket.OPEN &&
-        client.subscriptions.has(channel)
-      ) {
-        if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
-        client.ws.send(msg);
-        metrics.messagesSent++;
-        metrics.bytesSent += msg.length;
+      for (const client of slabClients) {
+        if (
+          client.ws.readyState === WebSocket.OPEN &&
+          client.subscriptions.has(channel)
+        ) {
+          if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
+          client.ws.send(msg);
+          metrics.messagesSent++;
+          metrics.bytesSent += msg.length;
+        }
       }
+    } catch (err) {
+      logger.error("Error in funding.updated handler", { error: err instanceof Error ? err.message : String(err) });
     }
   });
 
