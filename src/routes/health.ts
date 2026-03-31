@@ -5,10 +5,16 @@ import { getWebSocketMetrics } from "./ws.js";
 const logger = createLogger("api:health");
 const startTime = Date.now();
 
+const HEALTH_CACHE_TTL_MS = 5_000;
+let cachedHealth: { body: unknown; statusCode: number; checkedAt: number } | null = null;
+
 export function healthRoutes(): Hono {
   const app = new Hono();
   
   app.get("/health", async (c) => {
+    if (cachedHealth && Date.now() - cachedHealth.checkedAt < HEALTH_CACHE_TTL_MS) {
+      return c.json(cachedHealth.body, cachedHealth.statusCode as 200 | 503);
+    }
     const checks: { db: boolean; rpc: boolean } = { db: false, rpc: false };
     let status: "ok" | "degraded" | "down" = "ok";
     
@@ -47,7 +53,9 @@ export function healthRoutes(): Hono {
     const uptime = Math.floor((Date.now() - startTime) / 1000);
     const statusCode = status === "down" ? 503 : 200;
     
-    return c.json({ status, checks, uptime }, statusCode);
+    const body = { status, checks, uptime };
+    cachedHealth = { body, statusCode, checkedAt: Date.now() };
+    return c.json(body, statusCode as 200 | 503);
   });
   
   app.get("/ws/stats", async (c) => {
