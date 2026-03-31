@@ -7,7 +7,8 @@ import {
   createLogger,
   sanitizeSlabAddress,
   sanitizePagination,
-  sanitizeNumber
+  sanitizeNumber,
+  truncateErrorMessage
 } from "@percolator/shared";
 
 const logger = createLogger("api:trades");
@@ -29,7 +30,7 @@ export function tradeRoutes(): Hono {
       const trades = await getRecentTrades(slab, safeLimit);
       return c.json({ trades });
     } catch (err) {
-      logger.error("Error fetching trades", { error: err instanceof Error ? err.message : err });
+      logger.error("Error fetching trades", { error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
       return c.json({ error: "Failed to fetch trades" }, 500);
     }
   });
@@ -45,7 +46,7 @@ export function tradeRoutes(): Hono {
       const { volume, tradeCount } = await get24hVolume(slab);
       return c.json({ slab_address: slab, volume_24h: volume, trade_count_24h: tradeCount });
     } catch (err) {
-      logger.error("Error fetching volume", { error: err instanceof Error ? err.message : err });
+      logger.error("Error fetching volume", { error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
       return c.json({ error: "Failed to fetch volume" }, 500);
     }
   });
@@ -72,7 +73,7 @@ export function tradeRoutes(): Hono {
         })),
       });
     } catch (err) {
-      logger.error("Error fetching price history", { error: err instanceof Error ? err.message : err });
+      logger.error("Error fetching price history", { error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
       return c.json({ error: "Failed to fetch price history" }, 500);
     }
   });
@@ -86,7 +87,7 @@ export function tradeRoutes(): Hono {
       const trades = await getGlobalRecentTrades(safeLimit);
       return c.json({ trades });
     } catch (err) {
-      logger.error("Error fetching global trades", { error: err instanceof Error ? err.message : err });
+      logger.error("Error fetching global trades", { error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
       return c.json({ error: "Failed to fetch trades" }, 500);
     }
   });
