@@ -19,7 +19,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [k, v] of readBuckets) if (v.resetAt <= now) readBuckets.delete(k);
   for (const [k, v] of writeBuckets) if (v.resetAt <= now) writeBuckets.delete(k);
-}, 5 * 60_000);
+}, 5 * 60_000).unref();
 
 /**
  * Extract client IP with configurable trusted proxy depth.

@@ -161,7 +161,7 @@ setInterval(() => {
       : now - rec.windowStart > AUTH_FAILURE_WINDOW_MS * 2;
     if (stale) authFailuresPerIp.delete(ip);
   }
-}, AUTH_FAILURE_BAN_DURATION_MS);
+}, AUTH_FAILURE_BAN_DURATION_MS).unref();
 
 // Track connections per slab (for per-slab limits)
 const connectionsPerSlab = new Map<string, Set<WsClient>>();
@@ -212,7 +212,7 @@ setInterval(() => {
   metrics.bytesReceived = 0;
   metrics.bytesSent = 0;
   metrics.lastResetTime = now;
-}, 60_000);
+}, 60_000).unref();
 
 /**
  * Extract client IP from request
