@@ -45,7 +45,7 @@ export function healthRoutes(): Hono {
     }
     
     const uptime = Math.floor((Date.now() - startTime) / 1000);
-    const statusCode = status === "down" ? 503 : 200;
+    const statusCode = status === "ok" ? 200 : 503;
     
     return c.json({ status, checks, uptime }, statusCode);
   });
