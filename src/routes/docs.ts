@@ -17,7 +17,7 @@ export function docsRoutes(): Hono {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Percolator API Documentation</title>
-  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui.css">
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui.css" integrity="sha384-fggJG3d/1uo8FjBTP7/QTfjIzaMS1AWDUnQarNCJZzqQlqjGLP0Kx8Un9XXsiv2q" crossorigin="anonymous">
   <style>
     html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
     *, *:before, *:after { box-sizing: inherit; }
@@ -27,8 +27,8 @@ export function docsRoutes(): Hono {
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-bundle.js"></script>
-  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-standalone-preset.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-bundle.js" integrity="sha384-scCk4H/owymn3wdPNx4OQh/3JuTclN1cRMh0Rbj4htBKPImeXEghC5zPAFLZnTts" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-standalone-preset.js" integrity="sha384-azzkurII4f+bjmZvm3hWhj7JezshyXtwobwneRyWCCIksK61Xi0Ry3xA2am9/TWp" crossorigin="anonymous"></script>
   <script>
     window.onload = function() {
       window.ui = SwaggerUIBundle({
