@@ -166,10 +166,9 @@ app.get("/", (c) => c.json({
 
 // Global error handler
 app.onError((err, c) => {
-  // Truncate error message for logs
   logger.error("Unhandled error", {
     error: truncateErrorMessage(err.message, 120),
-    stack: err.stack,
+    stack: truncateErrorMessage(err.stack ?? "", 500),
     endpoint: c.req.path,
     method: c.req.method
   });
