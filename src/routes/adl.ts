@@ -50,6 +50,7 @@ import {
   createLogger,
   sanitizeSlabAddress,
 } from "@percolator/shared";
+import { isBlockedSlab } from "../middleware/validateSlab.js";
 
 const logger = createLogger("api:adl");
 
@@ -147,6 +148,10 @@ export function adlRoutes(): Hono {
       new PublicKey(slab); // throws if invalid
     } catch {
       return c.json({ error: "Invalid slab address" }, 400);
+    }
+
+    if (isBlockedSlab(slab)) {
+      return c.json({ error: "Market not found" }, 404);
     }
 
     const connection = getConnection();
