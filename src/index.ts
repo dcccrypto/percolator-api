@@ -206,40 +206,55 @@ if (process.env.NODE_ENV && !validNodeEnvs.includes(process.env.NODE_ENV)) {
 
 const port = Number(process.env.API_PORT ?? 3001);
 
-// Database connectivity pre-flight check
+// Database connectivity pre-flight check with retry
+const DB_VERIFY_MAX_RETRIES = 3;
+const DB_VERIFY_BASE_DELAY_MS = 2_000;
+
 async function verifyDatabaseConnection(): Promise<void> {
-  try {
-    logger.info("Verifying database connectivity...");
-    
-    // Query markets table to verify connection
-    const { count, error } = await getSupabase()
-      .from("markets")
-      .select("id", { count: "exact", head: true });
-    
-    if (error) {
-      throw error;
-    }
-    
-    logger.info("✓ Database connection verified", { marketCount: count });
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    logger.error("✗ Database connection failed", {
-      error: errorMsg,
-      supabaseUrl: process.env.SUPABASE_URL ? "configured" : "not configured",
-      supabaseKey: process.env.SUPABASE_KEY ? "configured" : "not configured"
-    });
-    
-    // Send critical alert
+  for (let attempt = 1; attempt <= DB_VERIFY_MAX_RETRIES; attempt++) {
     try {
-      await sendCriticalAlert("API startup failed: Database connection failed", [
-        { name: "Error", value: errorMsg.slice(0, 200), inline: false },
-        { name: "Reason", value: "API cannot start without database connectivity", inline: false },
-      ]);
-    } catch (alertErr) {
-      logger.error("Failed to send critical alert", { error: alertErr });
+      logger.info("Verifying database connectivity...", { attempt, maxRetries: DB_VERIFY_MAX_RETRIES });
+      
+      const { count, error } = await getSupabase()
+        .from("markets")
+        .select("id", { count: "exact", head: true });
+      
+      if (error) {
+        throw error;
+      }
+      
+      logger.info("✓ Database connection verified", { marketCount: count });
+      return;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+
+      if (attempt < DB_VERIFY_MAX_RETRIES) {
+        const delay = DB_VERIFY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        logger.warn(`Database connection attempt ${attempt}/${DB_VERIFY_MAX_RETRIES} failed, retrying in ${delay}ms`, {
+          error: errorMsg,
+        });
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+
+      logger.error("✗ Database connection failed after all retries", {
+        error: errorMsg,
+        attempts: DB_VERIFY_MAX_RETRIES,
+        supabaseUrl: process.env.SUPABASE_URL ? "configured" : "not configured",
+        supabaseKey: process.env.SUPABASE_KEY ? "configured" : "not configured"
+      });
+      
+      try {
+        await sendCriticalAlert("API startup failed: Database connection failed", [
+          { name: "Error", value: errorMsg.slice(0, 200), inline: false },
+          { name: "Reason", value: `API cannot start — database unreachable after ${DB_VERIFY_MAX_RETRIES} attempts`, inline: false },
+        ]);
+      } catch (alertErr) {
+        logger.error("Failed to send critical alert", { error: alertErr });
+      }
+      
+      process.exit(1);
     }
-    
-    process.exit(1);
   }
 }
 
