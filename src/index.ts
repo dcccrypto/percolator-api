@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
+import { bodyLimit } from "hono/body-limit";
 import { serve } from "@hono/node-server";
 import { createLogger, sendInfoAlert, getSupabase, sendCriticalAlert, truncateErrorMessage } from "@percolator/shared";
 import { initSentry, sentryMiddleware, flushSentry } from "./middleware/sentry.js";
@@ -73,6 +74,13 @@ app.use("*", cors({
   // middleware to those routes. See middleware/auth.ts.
   allowMethods: ["GET", "OPTIONS"],
   allowHeaders: ["Content-Type", "x-api-key"],
+}));
+
+// Request body size limit — prevents large payload attacks.
+// Applied globally so future write endpoints inherit a safe default.
+app.use("*", bodyLimit({
+  maxSize: 100 * 1024, // 100KB
+  onError: (c) => c.json({ error: "Request body too large" }, 413),
 }));
 
 // Default-deny for mutation methods. Until write endpoints are added,
