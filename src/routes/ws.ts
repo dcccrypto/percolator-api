@@ -73,6 +73,10 @@ const WS_SECRET = WS_AUTH_SECRET || (IS_PRODUCTION ? "" : "percolator-ws-dev-sec
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
 const PONG_TIMEOUT_MS = 10_000; // 10 seconds to respond to ping
 
+// Per-client message rate limiting
+const CLIENT_MSG_WINDOW_MS = 60_000; // 1-minute window
+const CLIENT_MSG_LIMIT = 60; // max 60 messages per minute per client
+
 // Price update batching configuration
 const PRICE_BATCH_INTERVAL_MS = 500; // Batch price updates every 500ms per slab
 
@@ -89,6 +93,8 @@ interface WsClient {
   authenticatedSlab?: string; // Slab address from auth token (if slab-bound)
   ip: string; // Client IP address
   authTimeout?: ReturnType<typeof setTimeout>; // Auth timeout timer
+  msgCount: number; // Messages received in current window
+  msgWindowStart: number; // Start of current rate-limit window
 }
 
 // Track global subscription count across all clients
@@ -574,7 +580,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
       authenticated,
       initiallyAuthenticated: authenticated,
       authenticatedSlab,
-      ip: clientIp
+      ip: clientIp,
+      msgCount: 0,
+      msgWindowStart: Date.now(),
     };
     clients.add(client);
     metrics.totalConnections = clients.size;
@@ -644,6 +652,21 @@ export function setupWebSocket(server: Server): WebSocketServer {
         // Limit message size
         if (rawStr.length > 1024) {
           ws.send(JSON.stringify({ type: "error", message: "Message too large" }));
+          return;
+        }
+
+        // Per-client message rate limiting
+        const now = Date.now();
+        if (now - client.msgWindowStart > CLIENT_MSG_WINDOW_MS) {
+          client.msgCount = 0;
+          client.msgWindowStart = now;
+        }
+        client.msgCount++;
+        if (client.msgCount > CLIENT_MSG_LIMIT) {
+          ws.send(JSON.stringify({ type: "error", message: "Message rate limit exceeded" }));
+          if (client.msgCount === CLIENT_MSG_LIMIT + 1) {
+            logger.warn("Client message rate limit exceeded", { ip: client.ip });
+          }
           return;
         }
         
