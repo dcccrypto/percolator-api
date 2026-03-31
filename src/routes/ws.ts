@@ -405,6 +405,13 @@ export function getWebSocketMetrics(): any {
 
 export function setupWebSocket(server: Server): WebSocketServer {
   const wss = new WebSocketServer({ server, maxPayload: 4096 });
+
+  wss.on("error", (err) => {
+    logger.error("WebSocketServer error", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
   // H2: Use Set for O(1) removal
   const clients = new Set<WsClient>();
 
@@ -632,6 +639,13 @@ export function setupWebSocket(server: Server): WebSocketServer {
     }, HEARTBEAT_INTERVAL_MS);
 
     ws.send(JSON.stringify({ type: "connected", message: "Percolator WebSocket connected" }));
+
+    ws.on("error", (err) => {
+      logger.warn("WebSocket connection error", {
+        ip: client.ip,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     ws.on("message", async (raw) => {
       try {
