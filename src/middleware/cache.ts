@@ -66,9 +66,10 @@ export function cacheMiddleware(ttlSeconds: number) {
       return next();
     }
     
-    // Cache key = path + query string
+    // Cache key = path + sorted query string (prevents cache pollution via parameter reordering)
     const url = new URL(c.req.url);
-    const cacheKey = url.pathname + url.search;
+    url.searchParams.sort();
+    const cacheKey = url.pathname + (url.searchParams.size > 0 ? `?${url.searchParams.toString()}` : "");
     
     // Check If-None-Match header for conditional requests
     const ifNoneMatch = c.req.header("If-None-Match");
