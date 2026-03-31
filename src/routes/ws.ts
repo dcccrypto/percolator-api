@@ -691,6 +691,12 @@ export function setupWebSocket(server: Server): WebSocketServer {
         
         // Handle subscribe with channels array
         if (msg.type === "subscribe" && msg.channels && Array.isArray(msg.channels)) {
+          const MAX_CHANNELS_PER_MESSAGE = 50;
+          if (msg.channels.length > MAX_CHANNELS_PER_MESSAGE) {
+            ws.send(JSON.stringify({ type: "error", message: `Max ${MAX_CHANNELS_PER_MESSAGE} channels per subscribe message` }));
+            return;
+          }
+
           const subscribed: string[] = [];
           const errors: string[] = [];
           
@@ -840,6 +846,11 @@ export function setupWebSocket(server: Server): WebSocketServer {
         }
         // Handle unsubscribe with channels array
         else if (msg.type === "unsubscribe" && msg.channels && Array.isArray(msg.channels)) {
+          if (msg.channels.length > MAX_SUBSCRIPTIONS_PER_CLIENT) {
+            ws.send(JSON.stringify({ type: "error", message: "Too many channels in unsubscribe message" }));
+            return;
+          }
+
           const unsubscribed: string[] = [];
           
           for (const channel of msg.channels) {
