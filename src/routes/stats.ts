@@ -50,8 +50,11 @@ export function statsRoutes(): Hono {
 
       if (statsError) throw statsError;
 
-      const volume24h = (stats ?? []).reduce((sum, s) => sum + BigInt(s.volume_24h ?? "0"), BigInt(0));
-      const totalOI = (stats ?? []).reduce((sum, s) => sum + BigInt(s.total_open_interest ?? "0"), BigInt(0));
+      const safeBigInt = (val: unknown): bigint => {
+        try { return BigInt(val as string); } catch { return 0n; }
+      };
+      const volume24h = (stats ?? []).reduce((sum, s) => sum + safeBigInt(s.volume_24h ?? "0"), 0n);
+      const totalOI = (stats ?? []).reduce((sum, s) => sum + safeBigInt(s.total_open_interest ?? "0"), 0n);
 
       // Count unique deployers — filter by network
       const { data: deployers, error: deployersError } = await getSupabase()
