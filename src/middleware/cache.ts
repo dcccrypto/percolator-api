@@ -77,19 +77,19 @@ export function cacheMiddleware(ttlSeconds: number) {
     const cached = cache.get(cacheKey, ttlSeconds);
     
     if (cached) {
-      // If client sent If-None-Match and it matches our ETag, return 304
       if (ifNoneMatch && ifNoneMatch === cached.etag) {
         c.status(304);
         c.header("ETag", cached.etag);
         c.header("Cache-Control", `public, max-age=${ttlSeconds}`);
+        c.header("Vary", "Accept-Encoding, Origin");
         return c.body(null);
       }
       
-      // Return cached response with headers
       c.status(200);
       c.header("Content-Type", cached.headers["Content-Type"] || "application/json");
       c.header("ETag", cached.etag);
       c.header("Cache-Control", `public, max-age=${ttlSeconds}`);
+      c.header("Vary", "Accept-Encoding, Origin");
       c.header("X-Cache", "HIT");
       return c.body(cached.body);
     }
@@ -104,9 +104,9 @@ export function cacheMiddleware(ttlSeconds: number) {
       
       const entry = cache.set(cacheKey, body, { "Content-Type": contentType });
       
-      // Add cache headers to response
       c.header("ETag", entry.etag);
       c.header("Cache-Control", `public, max-age=${ttlSeconds}`);
+      c.header("Vary", "Accept-Encoding, Origin");
       c.header("X-Cache", "MISS");
     }
   });
