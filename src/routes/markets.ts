@@ -78,10 +78,14 @@ export function marketRoutes(): Hono {
     return c.json({ markets: result });
   });
 
-  // GET /markets/stats — all market stats from DB
+  // GET /markets/stats — all market stats from DB (filtered by network)
   app.get("/markets/stats", async (c) => {
     try {
-      const { data, error } = await getSupabase().from("market_stats").select("*");
+      const { data, error } = await getSupabase()
+        .from("markets_with_stats")
+        .select("*")
+        .eq("network", getNetwork())
+        .not("slab_address", "is", null);
       if (error) throw error;
       return c.json({ stats: data ?? [] });
     } catch (err) {
