@@ -404,7 +404,7 @@ export function getWebSocketMetrics(): any {
 }
 
 export function setupWebSocket(server: Server): WebSocketServer {
-  const wss = new WebSocketServer({ server, maxPayload: 4096 });
+  const wss = new WebSocketServer({ server, maxPayload: 1024 });
   // H2: Use Set for O(1) removal
   const clients = new Set<WsClient>();
 
