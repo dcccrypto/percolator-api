@@ -226,7 +226,7 @@ async function verifyDatabaseConnection(): Promise<void> {
     logger.error("✗ Database connection failed", {
       error: errorMsg,
       supabaseUrl: process.env.SUPABASE_URL ? "configured" : "not configured",
-      supabaseKey: process.env.SUPABASE_KEY ? "configured" : "not configured"
+      supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY ? "configured" : "not configured"
     });
     
     // Send critical alert
