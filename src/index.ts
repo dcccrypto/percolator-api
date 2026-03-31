@@ -54,12 +54,21 @@ app.use("*", cors({
       return origin;
     }
 
-    // Support wildcard patterns (e.g. *.vercel.app)
+    // Support wildcard patterns (e.g. https://*.vercel.app)
     for (const allowed of allowedOrigins) {
       if (allowed.startsWith("https://*.")) {
-        const suffix = allowed.slice("https://*".length); // e.g. ".vercel.app"
-        if (origin.startsWith("https://") && origin.endsWith(suffix)) {
-          return origin;
+        const wildcardDomain = allowed.slice("https://*.".length); // e.g. "vercel.app"
+        try {
+          const originUrl = new URL(origin);
+          if (
+            originUrl.protocol === "https:" &&
+            originUrl.hostname.endsWith("." + wildcardDomain) &&
+            originUrl.hostname.length > wildcardDomain.length + 1
+          ) {
+            return origin;
+          }
+        } catch {
+          // Malformed origin — reject
         }
       }
     }
