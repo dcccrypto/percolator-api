@@ -818,6 +818,13 @@ export function setupWebSocket(server: Server): WebSocketServer {
             return;
           }
           
+          // Check per-slab connection limit before subscribing
+          const slabClients = connectionsPerSlab.get(sanitized);
+          if (slabClients && slabClients.size >= MAX_CONNECTIONS_PER_SLAB) {
+            ws.send(JSON.stringify({ type: "error", message: `Max ${MAX_CONNECTIONS_PER_SLAB} connections for this market` }));
+            return;
+          }
+
           // Subscribe to all channels for this slab (backward compatibility)
           const channels = [`price:${sanitized}`, `trades:${sanitized}`, `funding:${sanitized}`];
           ws.send(JSON.stringify({ 
@@ -825,7 +832,6 @@ export function setupWebSocket(server: Server): WebSocketServer {
             message: "Please use channels array. Subscribing to all channels for this slab." 
           }));
           
-          // Simulate channels subscription
           for (const channel of channels) {
             if (client.subscriptions.has(channel)) continue;
             if (globalSubscriptionCount >= MAX_GLOBAL_SUBSCRIPTIONS) break;
