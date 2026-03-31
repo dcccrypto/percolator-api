@@ -695,13 +695,15 @@ export function setupWebSocket(server: Server): WebSocketServer {
           const errors: string[] = [];
           
           for (const channel of msg.channels) {
-            // Validate channel format (e.g., "price:SOL", "trades:BTC")
-            if (!channel.includes(":")) {
-              errors.push(`Invalid channel format: ${channel}`);
+            if (typeof channel !== "string") continue;
+            const safeChannel = channel.slice(0, 100);
+
+            if (!safeChannel.includes(":")) {
+              errors.push(`Invalid channel format: ${safeChannel}`);
               continue;
             }
             
-            const [channelType, slabAddress] = channel.split(":");
+            const [channelType, slabAddress] = safeChannel.split(":");
             if (!["price", "trades", "funding"].includes(channelType)) {
               errors.push(`Unknown channel type: ${channelType}`);
               continue;
@@ -710,7 +712,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
             // Sanitize slab address
             const sanitized = sanitizeSlabAddress(slabAddress);
             if (!sanitized) {
-              errors.push(`Invalid slab address: ${slabAddress}`);
+              errors.push(`Invalid slab address`);
               continue;
             }
             
