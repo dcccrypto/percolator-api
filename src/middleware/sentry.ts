@@ -54,10 +54,13 @@ export function sentryMiddleware(): MiddlewareHandler {
       scope.setTag("http.method", c.req.method);
       scope.setTag("http.path", c.req.path);
       
-      // Set API key user if present (pseudonymous)
+      // Set a hashed API key fingerprint as pseudonymous user ID.
+      // Avoid sending any raw key material (even a prefix) to third-party services.
       const apiKey = c.req.header("x-api-key");
       if (apiKey) {
-        scope.setUser({ id: `api-key:${apiKey.slice(0, 8)}...` });
+        const { createHash } = await import("node:crypto");
+        const fingerprint = createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
+        scope.setUser({ id: `api-key:${fingerprint}` });
       }
 
       try {
