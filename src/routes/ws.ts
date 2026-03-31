@@ -224,18 +224,23 @@ setInterval(() => {
  */
 const WS_PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
 
+function normalizeIp(ip: string): string {
+  if (ip.startsWith("::ffff:")) return ip.slice(7);
+  return ip;
+}
+
 function getClientIp(req: IncomingMessage): string {
   if (WS_PROXY_DEPTH === 0) {
-    return req.socket.remoteAddress || "unknown";
+    return normalizeIp(req.socket.remoteAddress || "unknown");
   }
 
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string") {
     const ips = forwarded.split(",").map(ip => ip.trim()).filter(Boolean);
     const idx = Math.max(0, ips.length - WS_PROXY_DEPTH);
-    return ips[idx] || req.socket.remoteAddress || "unknown";
+    return normalizeIp(ips[idx] || req.socket.remoteAddress || "unknown");
   }
-  return req.socket.remoteAddress || "unknown";
+  return normalizeIp(req.socket.remoteAddress || "unknown");
 }
 
 /**
