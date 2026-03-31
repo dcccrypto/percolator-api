@@ -106,11 +106,11 @@ app.use("*", sentryMiddleware());
 app.use("*", async (c, next) => {
   await next();
   
-  // Set security headers
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Frame-Options", "DENY");
   c.header("X-XSS-Protection", "1; mode=block");
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()");
   
   // Content-Security-Policy for Swagger UI (allows unpkg.com for Swagger resources)
   c.header("Content-Security-Policy", "script-src 'self' unpkg.com; style-src 'self' unpkg.com 'unsafe-inline'");
