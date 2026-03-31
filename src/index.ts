@@ -112,8 +112,7 @@ app.use("*", async (c, next) => {
   c.header("X-XSS-Protection", "1; mode=block");
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
   
-  // Content-Security-Policy for Swagger UI (allows unpkg.com for Swagger resources)
-  c.header("Content-Security-Policy", "script-src 'self' unpkg.com; style-src 'self' unpkg.com 'unsafe-inline'");
+  c.header("Content-Security-Policy", "default-src 'none'; script-src 'self' unpkg.com; style-src 'self' unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'");
   
   // Only add HSTS if using HTTPS
   const proto = c.req.header("x-forwarded-proto") || "http";
