@@ -182,8 +182,10 @@ export function chartRoutes(): Hono {
     // Step 2: fetch OHLCV
     const candles = await fetchOhlcv(poolAddress, timeframe, aggregate, limit);
 
-    // Cache
-    cache.set(cacheKey, { candles, poolAddress, fetchedAt: Date.now() });
+    // Only cache non-empty results to avoid persisting upstream failures
+    if (candles.length > 0) {
+      cache.set(cacheKey, { candles, poolAddress, fetchedAt: Date.now() });
+    }
 
     // Evict oldest entries when over limit
     if (cache.size > CACHE_MAX_SIZE) {
