@@ -929,7 +929,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
       
       // H2: O(1) removal with Set
       // Decrement global subscription count for all client subscriptions
-      globalSubscriptionCount -= client.subscriptions.size;
+      globalSubscriptionCount = Math.max(0, globalSubscriptionCount - client.subscriptions.size);
       clients.delete(client);
       metrics.totalConnections = clients.size;
       
