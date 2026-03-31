@@ -42,11 +42,13 @@ export function statsRoutes(): Hono {
 
       if (marketsError) throw marketsError;
 
-      // Aggregate stats from market_stats — stats are naturally isolated since
-      // slab_address is unique per network. No network filter needed on market_stats.
+      // Aggregate stats from markets_with_stats view — filter by network to
+      // prevent cross-network volume/OI inflation in shared DB deployments.
       const { data: stats, error: statsError } = await getSupabase()
-        .from("market_stats")
-        .select("volume_24h, total_open_interest");
+        .from("markets_with_stats")
+        .select("volume_24h, total_open_interest")
+        .eq("network", network)
+        .not("slab_address", "is", null);
 
       if (statsError) throw statsError;
 
