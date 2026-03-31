@@ -13,6 +13,7 @@ const writeBuckets = new Map<string, RateBucket>();
 const WINDOW_MS = 60_000; // 1 minute
 const READ_LIMIT = 100; // 100 requests per minute for reads
 const WRITE_LIMIT = 10; // 10 requests per minute for writes
+const MAX_RATE_LIMIT_ENTRIES = 50_000; // cap to prevent OOM from distributed DDoS
 
 // Clean up expired buckets every 5 minutes
 setInterval(() => {
@@ -69,6 +70,10 @@ function checkLimit(
   let bucket = buckets.get(ip);
   
   if (!bucket || bucket.resetAt <= now) {
+    if (!bucket && buckets.size >= MAX_RATE_LIMIT_ENTRIES) {
+      const oldestKey = buckets.keys().next().value;
+      if (oldestKey !== undefined) buckets.delete(oldestKey);
+    }
     bucket = { count: 0, resetAt: now + WINDOW_MS };
     buckets.set(ip, bucket);
   }
