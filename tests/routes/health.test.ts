@@ -59,28 +59,28 @@ describe("health routes", () => {
     expect(typeof data.uptime).toBe("number");
   });
 
-  it("should return 200 with degraded status when RPC fails", async () => {
+  it("should return 503 with degraded status when RPC fails", async () => {
     mockConnection.getSlot.mockRejectedValue(new Error("RPC connection failed"));
     mockSupabase.select.mockResolvedValue({ count: 5, error: null });
 
     const app = healthRoutes();
     const res = await app.request("/health");
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     const data = await res.json();
     expect(data.status).toBe("degraded");
     expect(data.checks.rpc).toBe(false);
     expect(data.checks.db).toBe(true);
   });
 
-  it("should return 200 with degraded status when DB fails", async () => {
+  it("should return 503 with degraded status when DB fails", async () => {
     mockConnection.getSlot.mockResolvedValue(123456789);
     mockSupabase.select.mockRejectedValue(new Error("DB error"));
 
     const app = healthRoutes();
     const res = await app.request("/health");
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     const data = await res.json();
     expect(data.status).toBe("degraded");
     expect(data.checks.rpc).toBe(true);
