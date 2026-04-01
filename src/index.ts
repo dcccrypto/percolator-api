@@ -112,8 +112,7 @@ app.use("*", async (c, next) => {
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
   c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()");
   
-  // Content-Security-Policy for Swagger UI (allows unpkg.com for Swagger resources)
-  c.header("Content-Security-Policy", "script-src 'self' unpkg.com; style-src 'self' unpkg.com 'unsafe-inline'");
+  c.header("Content-Security-Policy", "default-src 'none'; script-src 'self' unpkg.com; style-src 'self' unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'");
   
   // Always send HSTS in production (proxy terminates TLS so x-forwarded-proto may be stripped by a MitM)
   if (process.env.NODE_ENV === "production") {
