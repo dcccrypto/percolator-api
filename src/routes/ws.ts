@@ -870,8 +870,11 @@ export function setupWebSocket(server: Server): WebSocketServer {
                       );
                     }
                   }
-                } catch {
-                  // Ignore errors fetching initial price
+                } catch (err) {
+                  logger.warn("Failed to fetch initial price for subscription", {
+                    slab,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
                 }
               }
             }
