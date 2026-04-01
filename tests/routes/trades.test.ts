@@ -55,6 +55,7 @@ vi.mock("@percolator/shared", () => ({
     if (max !== undefined && num > max) return null;
     return num;
   }),
+  truncateErrorMessage: vi.fn((msg: unknown, _limit?: number) => String(msg ?? "")),
   sendInfoAlert: vi.fn(),
   sendCriticalAlert: vi.fn(),
   sendWarningAlert: vi.fn(),

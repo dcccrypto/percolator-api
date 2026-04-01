@@ -10,7 +10,7 @@
 import { Hono } from "hono";
 import { validateSlab } from "../middleware/validateSlab.js";
 import { cacheMiddleware } from "../middleware/cache.js";
-import { getSupabase, createLogger } from "@percolator/shared";
+import { getSupabase, createLogger, truncateErrorMessage } from "@percolator/shared";
 
 /**
  * GH#1458: Phantom OI guard for history records.
@@ -109,7 +109,7 @@ export function openInterestRoutes(): Hono {
         history: filteredHistory,
       });
     } catch (err) {
-      logger.error("Error fetching OI data", { slab, error: err });
+      logger.error("Error fetching OI data", { slab, error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
       return c.json({ 
         error: "Failed to fetch open interest data",
         ...(process.env.NODE_ENV !== "production" && { details: err instanceof Error ? err.message : String(err) })
