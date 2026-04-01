@@ -103,6 +103,8 @@ export function readRateLimit() {
     c.header("X-RateLimit-Reset", result.reset.toString());
     
     if (!result.allowed) {
+      const retryAfter = Math.max(1, result.reset - Math.floor(Date.now() / 1000));
+      c.header("Retry-After", retryAfter.toString());
       logger.warn("Read rate limit exceeded", { 
         ip, 
         path: c.req.path,
@@ -126,6 +128,8 @@ export function writeRateLimit() {
     c.header("X-RateLimit-Reset", result.reset.toString());
     
     if (!result.allowed) {
+      const retryAfter = Math.max(1, result.reset - Math.floor(Date.now() / 1000));
+      c.header("Retry-After", retryAfter.toString());
       logger.warn("Write rate limit exceeded", { 
         ip, 
         path: c.req.path,
