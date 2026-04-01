@@ -567,6 +567,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
       if (!authenticated) {
         logger.warn("Invalid WS auth token provided", { ip: clientIp });
+        recordAuthFailure(clientIp);
       } else if (authenticatedSlab) {
         logger.info("Client authenticated with slab binding", { ip: clientIp, slab: authenticatedSlab });
       }
