@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { healthRoutes, __resetHealthCache } from "../../src/routes/health.js";
 
+// Mock ws module
+vi.mock("../../src/routes/ws.js", () => ({
+  getWebSocketMetrics: vi.fn(() => ({
+    totalConnections: 0,
+    limits: { maxGlobalConnections: 1000 },
+  })),
+}));
+
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
@@ -23,6 +31,7 @@ vi.mock("@percolator/shared", () => ({
 }));
 
 const { getConnection, getSupabase } = await import("@percolator/shared");
+const { getWebSocketMetrics } = await import("../../src/routes/ws.js");
 
 describe("health routes", () => {
   let mockConnection: any;
@@ -57,6 +66,7 @@ describe("health routes", () => {
     expect(data.status).toBe("ok");
     expect(data.checks.rpc).toBe(true);
     expect(data.checks.db).toBe(true);
+    expect(data.checks.ws).toBe(true);
     expect(typeof data.uptime).toBe("number");
   });
 
@@ -88,9 +98,10 @@ describe("health routes", () => {
     expect(data.checks.db).toBe(false);
   });
 
-  it("should return 503 with down status when both RPC and DB fail", async () => {
+  it("should return 503 with down status when all checks fail", async () => {
     mockConnection.getSlot.mockRejectedValue(new Error("RPC error"));
     mockSupabase.select.mockRejectedValue(new Error("DB error"));
+    vi.mocked(getWebSocketMetrics).mockImplementation(() => { throw new Error("WS unavailable"); });
 
     const app = healthRoutes();
     const res = await app.request("/health");
@@ -100,6 +111,7 @@ describe("health routes", () => {
     expect(data.status).toBe("down");
     expect(data.checks.rpc).toBe(false);
     expect(data.checks.db).toBe(false);
+    expect(data.checks.ws).toBe(false);
   });
 
   it("should include uptime in response", async () => {
