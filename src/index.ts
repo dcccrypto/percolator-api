@@ -115,10 +115,14 @@ app.use("*", async (c, next) => {
   // Content-Security-Policy for Swagger UI (allows unpkg.com for Swagger resources)
   c.header("Content-Security-Policy", "script-src 'self' unpkg.com; style-src 'self' unpkg.com 'unsafe-inline'");
   
-  // Only add HSTS if using HTTPS
-  const proto = c.req.header("x-forwarded-proto") || "http";
-  if (proto === "https") {
+  // Always send HSTS in production (proxy terminates TLS so x-forwarded-proto may be stripped by a MitM)
+  if (process.env.NODE_ENV === "production") {
     c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  } else {
+    const proto = c.req.header("x-forwarded-proto") || "http";
+    if (proto === "https") {
+      c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
   }
 
   // Prevent CDNs/proxies from caching error responses
