@@ -1,10 +1,20 @@
 import { Hono } from "hono";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Read the OpenAPI spec once at startup to avoid blocking the event loop on
+// each request and to cache the result for the lifetime of the process.
+let cachedOpenApiYaml: string | null = null;
+async function loadOpenApiYaml(): Promise<string> {
+  if (cachedOpenApiYaml) return cachedOpenApiYaml;
+  const openapiPath = join(__dirname, "..", "..", "openapi.yaml");
+  cachedOpenApiYaml = await readFile(openapiPath, "utf-8");
+  return cachedOpenApiYaml;
+}
 
 export function docsRoutes(): Hono {
   const app = new Hono();
@@ -21,7 +31,8 @@ export function docsRoutes(): Hono {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Percolator API Documentation</title>
-  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui.css">
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui.css"
+        crossorigin="anonymous">
   <style>
     html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
     *, *:before, *:after { box-sizing: inherit; }
@@ -31,8 +42,10 @@ export function docsRoutes(): Hono {
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-bundle.js"></script>
-  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-standalone-preset.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-bundle.js"
+          crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-standalone-preset.js"
+          crossorigin="anonymous"></script>
   <script>
     window.onload = function() {
       window.ui = SwaggerUIBundle({
@@ -63,12 +76,9 @@ export function docsRoutes(): Hono {
   });
 
   // Serve the OpenAPI YAML spec
-  app.get("/docs/openapi.yaml", (c) => {
+  app.get("/docs/openapi.yaml", async (c) => {
     try {
-      // Read the openapi.yaml file from the package root
-      const openapiPath = join(__dirname, "..", "..", "openapi.yaml");
-      const yaml = readFileSync(openapiPath, "utf-8");
-      
+      const yaml = await loadOpenApiYaml();
       c.header("Content-Type", "text/yaml");
       return c.body(yaml);
     } catch (err) {
