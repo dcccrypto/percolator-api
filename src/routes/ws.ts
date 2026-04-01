@@ -7,21 +7,25 @@ import { isClientIpBlocked } from "../middleware/ip-blocklist.js";
 
 const logger = createLogger("api:ws");
 
-// H2: Configurable limits
-const MAX_WS_CONNECTIONS = Number(process.env.MAX_WS_CONNECTIONS ?? 1000); // Increased global limit
-const MAX_CONNECTIONS_PER_SLAB = 100; // New: per-slab connection limit
-const MAX_BUFFER_BYTES = 64 * 1024; // 64KB
-const MAX_SUBSCRIPTIONS_PER_CLIENT = 50; // Prevent Helius WS subscription exhaustion
-const MAX_GLOBAL_SUBSCRIPTIONS = 1000; // Global subscription cap to prevent DoS
-/** Authenticated clients get the standard per-IP slot budget. */
+function safePositiveInt(envName: string, raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+    throw new Error(`Invalid ${envName}=${raw} — must be a positive integer`);
+  }
+  return n;
+}
+
+const MAX_WS_CONNECTIONS = safePositiveInt("MAX_WS_CONNECTIONS", process.env.MAX_WS_CONNECTIONS, 1000);
+const MAX_CONNECTIONS_PER_SLAB = 100;
+const MAX_BUFFER_BYTES = 64 * 1024;
+const MAX_SUBSCRIPTIONS_PER_CLIENT = 50;
+const MAX_GLOBAL_SUBSCRIPTIONS = 1000;
 const MAX_CONNECTIONS_PER_IP = 5;
-/**
- * Unauthenticated clients (no valid token at upgrade time) are limited to 3
- * concurrent connections per IP.  This gives a harder stop against connection-
- * flood DoS attacks before an attacker can exhaust the global limit.
- */
-const MAX_UNAUTHENTICATED_CONNECTIONS_PER_IP = Number(
-  process.env.MAX_UNAUTH_WS_CONNECTIONS_PER_IP ?? 3
+const MAX_UNAUTHENTICATED_CONNECTIONS_PER_IP = safePositiveInt(
+  "MAX_UNAUTH_WS_CONNECTIONS_PER_IP",
+  process.env.MAX_UNAUTH_WS_CONNECTIONS_PER_IP,
+  3
 );
 
 /**
