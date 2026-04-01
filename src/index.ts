@@ -109,7 +109,7 @@ app.use("*", async (c, next) => {
   // Set security headers
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Frame-Options", "DENY");
-  c.header("X-XSS-Protection", "1; mode=block");
+  c.header("X-XSS-Protection", "0");
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
   
   // Content-Security-Policy for Swagger UI (allows unpkg.com for Swagger resources)
