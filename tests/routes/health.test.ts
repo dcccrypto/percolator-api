@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { healthRoutes } from "../../src/routes/health.js";
+import { healthRoutes, __resetHealthCache } from "../../src/routes/health.js";
 
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
@@ -30,6 +30,7 @@ describe("health routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetHealthCache();
 
     mockConnection = {
       getSlot: vi.fn(),

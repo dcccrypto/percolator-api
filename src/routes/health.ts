@@ -8,6 +8,11 @@ const startTime = Date.now();
 const HEALTH_CACHE_TTL_MS = 5_000;
 let cachedHealth: { body: unknown; statusCode: number; checkedAt: number } | null = null;
 
+/** @internal Reset cache — used by tests to ensure isolation */
+export function __resetHealthCache(): void {
+  cachedHealth = null;
+}
+
 export function healthRoutes(): Hono {
   const app = new Hono();
   
