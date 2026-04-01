@@ -288,8 +288,17 @@ const server = serve({ fetch: app.fetch, port }, async (info) => {
 
 const wss = setupWebSocket(server as unknown as import("node:http").Server);
 
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+
 async function shutdown(signal: string): Promise<void> {
   logger.info("Shutdown initiated", { signal });
+
+  // Force-exit if graceful shutdown takes too long
+  const forceExit = setTimeout(() => {
+    logger.error("Graceful shutdown timed out, forcing exit");
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExit.unref();
   
   try {
     // Flush Sentry events before shutting down
@@ -299,6 +308,11 @@ async function shutdown(signal: string): Promise<void> {
     await sendInfoAlert("API service shutting down", [
       { name: "Signal", value: signal, inline: true },
     ]);
+
+    // Terminate all active WebSocket connections so they don't hold the server open
+    for (const client of wss.clients) {
+      client.close(1001, "Server shutting down");
+    }
     
     // Close WebSocket server (stops accepting new connections)
     logger.info("Closing WebSocket server");
