@@ -21,7 +21,7 @@ export function healthRoutes(): Hono {
     if (cachedHealth && Date.now() - cachedHealth.checkedAt < HEALTH_CACHE_TTL_MS) {
       return c.json(cachedHealth.body, cachedHealth.statusCode as 200 | 503);
     }
-    const checks: { db: boolean; rpc: boolean } = { db: false, rpc: false };
+    const checks: { db: boolean; rpc: boolean; ws: boolean } = { db: false, rpc: false, ws: false };
     let status: "ok" | "degraded" | "down" = "ok";
     
     // Check RPC connectivity
@@ -46,6 +46,15 @@ export function healthRoutes(): Hono {
       checks.db = false;
     }
     
+    // Check WebSocket subsystem — saturated WS means new clients can't connect
+    try {
+      const wsMetrics = getWebSocketMetrics();
+      const utilization = wsMetrics.totalConnections / wsMetrics.limits.maxGlobalConnections;
+      checks.ws = utilization < 0.95; // degraded if >95% of connection slots used
+    } catch {
+      checks.ws = false;
+    }
+
     // Determine overall status
     const failedChecks = Object.values(checks).filter(v => !v).length;
     if (failedChecks === 0) {
