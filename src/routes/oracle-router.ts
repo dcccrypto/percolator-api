@@ -34,9 +34,11 @@ export function oracleRouterRoutes(): Hono {
       if (now >= entry.expiresAt) cache.delete(key);
     }
 
-    // Check cache
+    // Check cache — promote to most-recently-used on hit
     const cached = cache.get(mint);
     if (cached && now < cached.expiresAt) {
+      cache.delete(mint);
+      cache.set(mint, cached);
       return c.json({ ...cached.result, cached: true });
     }
 
