@@ -203,14 +203,15 @@ app.onError((err, c) => {
   }, 500);
 });
 
-// Validate NODE_ENV at startup
+// Validate NODE_ENV at startup — require it to be set to prevent accidental
+// information disclosure when deploying without an explicit NODE_ENV
 const validNodeEnvs = ["production", "development", "test"];
-if (process.env.NODE_ENV && !validNodeEnvs.includes(process.env.NODE_ENV)) {
-  logger.error("Invalid NODE_ENV configuration", {
-    nodeEnv: process.env.NODE_ENV,
+if (!process.env.NODE_ENV || !validNodeEnvs.includes(process.env.NODE_ENV)) {
+  logger.error("NODE_ENV must be explicitly set to one of: production, development, test", {
+    nodeEnv: process.env.NODE_ENV ?? "(unset)",
     validOptions: validNodeEnvs.join(", ")
   });
-  throw new Error(`Invalid NODE_ENV: ${process.env.NODE_ENV}. Must be one of: ${validNodeEnvs.join(", ")}`);
+  throw new Error(`NODE_ENV must be explicitly set. Got: ${process.env.NODE_ENV ?? "(unset)"}. Must be one of: ${validNodeEnvs.join(", ")}`);
 }
 
 const port = Number(process.env.API_PORT ?? 3001);
