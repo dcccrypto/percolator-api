@@ -1,31 +1,12 @@
 import { Hono } from "hono";
 import { PublicKey } from "@solana/web3.js";
-import { validateSlab } from "../middleware/validateSlab.js";
+import { validateSlab, isBlockedSlab } from "../middleware/validateSlab.js";
 import { cacheMiddleware } from "../middleware/cache.js";
 import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine } from "@percolator/sdk";
 import { getConnection, getSupabase, getNetwork, createLogger, sanitizeSlabAddress, truncateErrorMessage } from "@percolator/shared";
 
 const logger = createLogger("api:markets");
-
-// Markets to exclude from public API responses.
-// Populated from BLOCKED_MARKET_ADDRESSES env var (comma-separated slab addresses).
-// Use this to hide markets with wrong oracle_authority or corrupt state (e.g. issue #837).
-// HARDCODED_BLOCKED_MARKETS provides a code-level safety net for known-bad markets
-// so they are excluded even if the env var is not set in a deployment.
-const HARDCODED_BLOCKED_MARKETS: ReadonlySet<string> = new Set([
-  // issue #837: wrong oracle_authority (5Eb8PY personal wallet), hardcoded $1 price,
-  // never timestamped — price manipulation risk on devnet.
-  "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT",
-]);
-
-const BLOCKED_MARKET_ADDRESSES: ReadonlySet<string> = new Set([
-  ...HARDCODED_BLOCKED_MARKETS,
-  ...(process.env.BLOCKED_MARKET_ADDRESSES ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean),
-]);
 
 export function marketRoutes(): Hono {
   const app = new Hono();
@@ -50,7 +31,7 @@ export function marketRoutes(): Hono {
         if (error) throw error;
 
         return (data ?? [])
-          .filter((m) => !BLOCKED_MARKET_ADDRESSES.has(m.slab_address))
+          .filter((m) => !isBlockedSlab(m.slab_address))
           .map((m) => ({
           slabAddress: m.slab_address,
           mintAddress: m.mint_address,
