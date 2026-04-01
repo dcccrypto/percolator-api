@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eventBus, getSupabase, createLogger, sanitizeSlabAddress } from "@percolator/shared";
 import { isClientIpBlocked } from "../middleware/ip-blocklist.js";
+import { isBlockedSlab } from "../middleware/validateSlab.js";
 
 const logger = createLogger("api:ws");
 
@@ -791,6 +792,12 @@ export function setupWebSocket(server: Server): WebSocketServer {
               errors.push(`Invalid slab address`);
               continue;
             }
+
+            // Reject blocked/phantom slabs (same blocklist as HTTP validateSlab middleware)
+            if (isBlockedSlab(sanitized)) {
+              errors.push(`Market not found: ${sanitized}`);
+              continue;
+            }
             
             // Verify slab binding if client is authenticated with a specific slab
             if (client.authenticatedSlab && client.authenticatedSlab !== sanitized) {
@@ -879,6 +886,12 @@ export function setupWebSocket(server: Server): WebSocketServer {
           const sanitized = sanitizeSlabAddress(msg.slabAddress);
           if (!sanitized) {
             ws.send(JSON.stringify({ type: "error", message: "Invalid slab address" }));
+            return;
+          }
+
+          // Reject blocked/phantom slabs
+          if (isBlockedSlab(sanitized)) {
+            ws.send(JSON.stringify({ type: "error", message: "Market not found" }));
             return;
           }
           
