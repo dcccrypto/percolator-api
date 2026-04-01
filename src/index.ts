@@ -120,6 +120,11 @@ app.use("*", async (c, next) => {
   if (proto === "https") {
     c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
+
+  // Prevent CDNs/proxies from caching error responses
+  if (c.res.status >= 400) {
+    c.header("Cache-Control", "no-store");
+  }
 });
 
 // Rate Limiting Middleware
