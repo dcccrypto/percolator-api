@@ -787,7 +787,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
                   }
                 } catch (err) {
                   logger.warn("Failed to fetch initial price for subscription", {
-                    slab: sanitized,
+                    slab,
                     error: err instanceof Error ? err.message : String(err),
                   });
                 }
