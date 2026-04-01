@@ -10,6 +10,7 @@ import {
   sanitizeNumber,
   truncateErrorMessage
 } from "@percolator/shared";
+import { validateSlab } from "../middleware/validateSlab.js";
 
 const logger = createLogger("api:trades");
 
@@ -17,11 +18,8 @@ export function tradeRoutes(): Hono {
   const app = new Hono();
 
   /** Recent trades for a specific market */
-  app.get("/markets/:slab/trades", async (c) => {
-    const slab = sanitizeSlabAddress(c.req.param("slab"));
-    if (!slab) {
-      return c.json({ error: "Invalid slab address" }, 400);
-    }
+  app.get("/markets/:slab/trades", validateSlab, async (c) => {
+    const slab = sanitizeSlabAddress(c.req.param("slab")!)!;
     
     const { limit } = sanitizePagination(c.req.query("limit"), 0);
     const safeLimit = Math.min(limit, 200); // Cap at 200
@@ -36,11 +34,8 @@ export function tradeRoutes(): Hono {
   });
 
   /** 24h volume for a specific market */
-  app.get("/markets/:slab/volume", async (c) => {
-    const slab = sanitizeSlabAddress(c.req.param("slab"));
-    if (!slab) {
-      return c.json({ error: "Invalid slab address" }, 400);
-    }
+  app.get("/markets/:slab/volume", validateSlab, async (c) => {
+    const slab = sanitizeSlabAddress(c.req.param("slab")!)!;
 
     try {
       const { volume, tradeCount } = await get24hVolume(slab);
@@ -52,11 +47,8 @@ export function tradeRoutes(): Hono {
   });
 
   /** Price history for a specific market (for charts) */
-  app.get("/markets/:slab/prices", async (c) => {
-    const slab = sanitizeSlabAddress(c.req.param("slab"));
-    if (!slab) {
-      return c.json({ error: "Invalid slab address" }, 400);
-    }
+  app.get("/markets/:slab/prices", validateSlab, async (c) => {
+    const slab = sanitizeSlabAddress(c.req.param("slab")!)!;
 
     // Default to 24h of price history
     const hoursBack = sanitizeNumber(c.req.query("hours"), 1, 720) ?? 24; // max 30 days
