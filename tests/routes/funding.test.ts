@@ -6,6 +6,7 @@ import { clearCache } from "../../src/middleware/cache.js";
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
   getConnection: vi.fn(),
+  getNetwork: vi.fn(() => "devnet"),
   getFundingHistory: vi.fn(),
   getFundingHistorySince: vi.fn(),
   createLogger: vi.fn(() => ({
@@ -29,6 +30,18 @@ vi.mock("@percolator/shared", () => ({
 const { getFundingHistory, getFundingHistorySince, getSupabase } = 
   await import("@percolator/shared");
 
+function chainable(resolvedValue: any): any {
+  const obj: any = {};
+  const methods = ["select", "eq", "neq", "gte", "lte", "not", "order", "limit", "single", "maybeSingle", "head"];
+  for (const m of methods) {
+    obj[m] = vi.fn(() => obj);
+  }
+  obj.then = (resolve: any) => Promise.resolve(resolvedValue).then(resolve);
+  obj.catch = (reject: any) => Promise.resolve(resolvedValue).catch(reject);
+  obj.finally = (fn: any) => Promise.resolve(resolvedValue).finally(fn);
+  return obj;
+}
+
 describe("funding routes", () => {
   let mockSupabase: any;
 
@@ -41,6 +54,7 @@ describe("funding routes", () => {
       from: vi.fn(() => mockSupabase),
       select: vi.fn(() => mockSupabase),
       eq: vi.fn(() => mockSupabase),
+      not: vi.fn(() => mockSupabase),
       single: vi.fn(() => mockSupabase),
     };
 
@@ -415,9 +429,7 @@ describe("funding routes", () => {
       ];
 
       // The route will be matched, need to make sure Supabase returns properly
-      mockSupabase.from.mockReturnValue({
-        select: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-      });
+      mockSupabase.from.mockReturnValue(chainable({ data: mockStats, error: null }));
 
       const app = fundingRoutes();
       const res = await app.request("/funding/global");
@@ -440,9 +452,7 @@ describe("funding routes", () => {
         },
       ];
 
-      mockSupabase.from.mockReturnValue({
-        select: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-      });
+      mockSupabase.from.mockReturnValue(chainable({ data: mockStats, error: null }));
 
       const app = fundingRoutes();
       const res = await app.request("/funding/global");
@@ -454,9 +464,7 @@ describe("funding routes", () => {
     });
 
     it("should handle empty markets list", async () => {
-      mockSupabase.from.mockReturnValue({
-        select: vi.fn().mockResolvedValue({ data: [], error: null }),
-      });
+      mockSupabase.from.mockReturnValue(chainable({ data: [], error: null }));
 
       const app = fundingRoutes();
       const res = await app.request("/funding/global");
@@ -490,9 +498,7 @@ describe("funding routes", () => {
           })),
         ];
 
-        mockSupabase.from.mockReturnValue({
-          select: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-        });
+        mockSupabase.from.mockReturnValue(chainable({ data: mockStats, error: null }));
 
         const app = fundingRoutes();
         const res = await app.request("/funding/global");
@@ -518,9 +524,7 @@ describe("funding routes", () => {
           net_lp_pos: "987000000000000000000000000000000000",
         }));
 
-        mockSupabase.from.mockReturnValue({
-          select: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-        });
+        mockSupabase.from.mockReturnValue(chainable({ data: mockStats, error: null }));
 
         const app = fundingRoutes();
         const res = await app.request("/funding/global");
@@ -537,9 +541,7 @@ describe("funding routes", () => {
           { slab_address: "22222222222222222222222222222222", funding_rate: -3, net_lp_pos: "500000" },
         ];
 
-        mockSupabase.from.mockReturnValue({
-          select: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-        });
+        mockSupabase.from.mockReturnValue(chainable({ data: mockStats, error: null }));
 
         const app = fundingRoutes();
         const res = await app.request("/funding/global");

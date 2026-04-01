@@ -267,7 +267,7 @@ describe("markets routes", () => {
         { slab_address: "22222222222222222222222222222222", total_open_interest: "3000000000" },
       ];
 
-      mockSupabase.select.mockResolvedValue({ data: mockStats, error: null });
+      mockSupabase.not.mockResolvedValue({ data: mockStats, error: null });
 
       const app = marketRoutes();
       const res = await app.request("/markets/stats");

@@ -66,16 +66,14 @@ describe("stats routes", () => {
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets") {
           return chainable({ count: 10, error: null });
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [
                 { volume_24h: "1000000000", total_open_interest: "5000000000" },
                 { volume_24h: "500000000", total_open_interest: "3000000000" },
               ],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 1250, error: null });
         }
@@ -99,16 +97,14 @@ describe("stats routes", () => {
               error: null,
             });
           }
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [
                 { volume_24h: "1000000000", total_open_interest: "5000000000" },
                 { volume_24h: "500000000", total_open_interest: "3000000000" },
               ],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 1250, error: null });
         }
@@ -131,16 +127,14 @@ describe("stats routes", () => {
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets") {
           return chainable({ count: 3, error: null });
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [
                 { volume_24h: "999999999999999999", total_open_interest: "999999999999999999" },
                 { volume_24h: "1", total_open_interest: "1" },
               ],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 0, error: null });
         }
@@ -159,16 +153,14 @@ describe("stats routes", () => {
               error: null,
             });
           }
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [
                 { volume_24h: "999999999999999999", total_open_interest: "999999999999999999" },
                 { volume_24h: "1", total_open_interest: "1" },
               ],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 0, error: null });
         }
@@ -188,13 +180,11 @@ describe("stats routes", () => {
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets") {
           return chainable({ count: 0, error: null });
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 0, error: null });
         }
@@ -213,13 +203,11 @@ describe("stats routes", () => {
               error: null,
             });
           }
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 0, error: null });
         }
@@ -242,16 +230,14 @@ describe("stats routes", () => {
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === "markets") {
           return chainable({ count: 2, error: null });
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [
                 { volume_24h: null, total_open_interest: null },
                 { volume_24h: "1000000000", total_open_interest: "5000000000" },
               ],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 100, error: null });
         }
@@ -270,16 +256,14 @@ describe("stats routes", () => {
               error: null,
             });
           }
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [
                 { volume_24h: null, total_open_interest: null },
                 { volume_24h: "1000000000", total_open_interest: "5000000000" },
               ],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 100, error: null });
         }
@@ -308,13 +292,11 @@ describe("stats routes", () => {
             return chainable({ count: 5, error: null });
           }
           return chainable({ data: [{ deployer: "D1" }], error: null });
-        } else if (table === "market_stats") {
-          return {
-            select: vi.fn().mockResolvedValue({
+        } else if (table === "markets_with_stats") {
+          return chainable({
               data: [{ volume_24h: "100000", total_open_interest: "500000" }],
               error: null,
-            }),
-          };
+            });
         } else if (table === "trades") {
           return chainable({ count: 10, error: null });
         }
