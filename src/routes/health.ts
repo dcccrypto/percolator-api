@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getConnection, getSupabase, createLogger, truncateErrorMessage } from "@percolator/shared";
 import { getWebSocketMetrics } from "./ws.js";
+import { requireApiKey } from "../middleware/auth.js";
 
 const logger = createLogger("api:health");
 const startTime = Date.now();
@@ -50,7 +51,7 @@ export function healthRoutes(): Hono {
     return c.json({ status, checks, uptime }, statusCode);
   });
   
-  app.get("/ws/stats", async (c) => {
+  app.get("/ws/stats", requireApiKey(), async (c) => {
     try {
       const metrics = getWebSocketMetrics();
       return c.json(metrics);
