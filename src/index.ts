@@ -118,6 +118,8 @@ app.use("*", async (c, next) => {
   c.header("X-Frame-Options", "DENY");
   c.header("X-XSS-Protection", "0");
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.header("X-DNS-Prefetch-Control", "off");
+  c.header("X-Download-Options", "noopen");
   c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()");
   
   c.header("Content-Security-Policy", "default-src 'none'; script-src 'self' unpkg.com; style-src 'self' unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'");
@@ -257,7 +259,7 @@ async function verifyDatabaseConnection(): Promise<void> {
         error: errorMsg,
         attempts: DB_VERIFY_MAX_RETRIES,
         supabaseUrl: process.env.SUPABASE_URL ? "configured" : "not configured",
-        supabaseKey: process.env.SUPABASE_KEY ? "configured" : "not configured"
+        supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY ? "configured" : "not configured"
       });
       
       try {
