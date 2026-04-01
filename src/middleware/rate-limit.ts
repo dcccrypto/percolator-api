@@ -35,22 +35,24 @@ setInterval(() => {
  */
 const PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
 
+function normalizeIp(ip: string): string {
+  if (ip.startsWith("::ffff:")) return ip.slice(7);
+  return ip;
+}
+
 function getClientIp(c: Context): string {
   if (PROXY_DEPTH === 0) {
-    // No trusted proxy: ignore forwarded headers, use connection IP
-    return c.req.header("x-real-ip") ?? "unknown";
+    return normalizeIp(c.req.header("x-real-ip") ?? "unknown");
   }
 
   const forwarded = c.req.header("x-forwarded-for");
   if (forwarded) {
     const ips = forwarded.split(",").map(ip => ip.trim()).filter(Boolean);
-    // Use the IP at (length - PROXY_DEPTH): the one the outermost
-    // trusted proxy appended for the real client.
     const idx = Math.max(0, ips.length - PROXY_DEPTH);
-    return ips[idx] || "unknown";
+    return normalizeIp(ips[idx] || "unknown");
   }
 
-  return c.req.header("x-real-ip") ?? "unknown";
+  return normalizeIp(c.req.header("x-real-ip") ?? "unknown");
 }
 
 interface RateLimitResult {

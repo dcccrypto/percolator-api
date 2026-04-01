@@ -81,9 +81,14 @@ function isBlocked(clientIp: string): boolean {
   return false;
 }
 
+function normalizeIp(ip: string): string {
+  if (ip.startsWith("::ffff:")) return ip.slice(7);
+  return ip;
+}
+
 function getClientIp(c: Context): string {
   if (PROXY_DEPTH === 0) {
-    return c.req.header("x-real-ip") ?? "unknown";
+    return normalizeIp(c.req.header("x-real-ip") ?? "unknown");
   }
   const forwarded = c.req.header("x-forwarded-for");
   if (forwarded) {
@@ -92,9 +97,9 @@ function getClientIp(c: Context): string {
       .map((ip) => ip.trim())
       .filter(Boolean);
     const idx = Math.max(0, ips.length - PROXY_DEPTH);
-    return ips[idx] || "unknown";
+    return normalizeIp(ips[idx] || "unknown");
   }
-  return c.req.header("x-real-ip") ?? "unknown";
+  return normalizeIp(c.req.header("x-real-ip") ?? "unknown");
 }
 
 export function ipBlocklist() {
