@@ -66,7 +66,9 @@ export async function withDbCacheFallback<T>(
           maxAgeMinutes: Math.floor(MAX_STALE_AGE_MS / 60_000),
         });
         
-        // Return cached data with warning header
+        c.header("X-Cache-Status", "stale-fallback");
+        c.header("X-Cache-Age", String(Math.floor(age / 1000)));
+        c.header("Warning", `110 - "Response is Stale (${ageMinutes}m old)"`);
         return cached.data as T;
       } else {
         logger.error("Cached data too old, cannot serve", {
