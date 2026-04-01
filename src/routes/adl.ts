@@ -194,7 +194,7 @@ export function adlRoutes(): Hono {
     const adlNeeded = capExceeded || utilizationTriggered;
     const excess = capExceeded && maxPnlCap > 0n
       ? (pnlPosTot - maxPnlCap).toString()
-      : pnlPosTot.toString();
+      : "0";
 
     let rankings: RankedPosition[] = [];
     if (adlNeeded) {
