@@ -104,6 +104,7 @@ const unauthenticatedConnectionsPerIp = new Map<string, number>();
 const AUTH_FAILURE_WINDOW_MS = 60_000;   // 60-second rolling window
 const AUTH_FAILURE_BAN_THRESHOLD = 10;   // ban after 10 failures in the window
 const AUTH_FAILURE_BAN_DURATION_MS = 300_000; // 5-minute ban
+const MAX_AUTH_FAILURE_ENTRIES = 10_000; // cap to prevent memory exhaustion from distributed attacks
 
 interface AuthFailureRecord {
   count: number;
@@ -119,6 +120,10 @@ function recordAuthFailure(ip: string): void {
   const now = Date.now();
   let rec = authFailuresPerIp.get(ip);
   if (!rec) {
+    if (authFailuresPerIp.size >= MAX_AUTH_FAILURE_ENTRIES) {
+      const oldestKey = authFailuresPerIp.keys().next().value;
+      if (oldestKey !== undefined) authFailuresPerIp.delete(oldestKey);
+    }
     rec = { count: 0, windowStart: now, bannedUntil: 0 };
     authFailuresPerIp.set(ip, rec);
   }
