@@ -147,8 +147,15 @@ export function marketRoutes(): Hono {
       });
     } catch (err) {
       const detail = err instanceof Error ? err.message : "Unknown error";
-      logger.error("Market fetch error", { detail, path: c.req.path });
-      return c.json({ error: "Failed to fetch market data" }, 400);
+      const isNotFound = detail.includes("not found") || detail.includes("Account does not exist");
+      if (isNotFound) {
+        return c.json({ error: "Market not found" }, 404);
+      }
+      logger.error("Market fetch error", {
+        detail: truncateErrorMessage(detail, 120),
+        path: c.req.path,
+      });
+      return c.json({ error: "Failed to fetch market data" }, 500);
     }
   });
 

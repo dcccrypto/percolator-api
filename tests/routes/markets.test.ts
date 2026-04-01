@@ -356,10 +356,9 @@ describe("markets routes", () => {
       const app = marketRoutes();
       const res = await app.request("/markets/11111111111111111111111111111111");
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(404);
       const data = await res.json();
-      // In production, error details are hidden; generic message returned
-      expect(data.error).toBe("Failed to fetch market data");
+      expect(data.error).toBe("Market not found");
     });
   });
 });
