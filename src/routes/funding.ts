@@ -15,6 +15,7 @@ import {
   getFundingHistory, 
   getFundingHistorySince,
   getSupabase,
+  getNetwork,
   createLogger,
   truncateErrorMessage,
 } from "@percolator/shared";
@@ -52,8 +53,10 @@ export function fundingRoutes(): Hono {
   app.get("/funding/global", async (c) => {
     try {
       const { data: allStats, error } = await getSupabase()
-        .from("market_stats")
-        .select("slab_address, funding_rate, net_lp_pos");
+        .from("markets_with_stats")
+        .select("slab_address, funding_rate, net_lp_pos")
+        .eq("network", getNetwork())
+        .not("slab_address", "is", null);
 
       if (error) throw error;
 

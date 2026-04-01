@@ -12,6 +12,7 @@ vi.mock("@percolator/shared", () => ({
     debug: vi.fn(),
   })),
   truncateErrorMessage: vi.fn((msg: string) => msg),
+  getNetwork: vi.fn(() => "devnet"),
   sanitizeSlabAddress: vi.fn((addr: string) => addr),
   sanitizePagination: vi.fn((p: any) => p),
   sanitizeString: vi.fn((s: string) => s),
@@ -24,6 +25,21 @@ vi.mock("@percolator/shared", () => ({
 
 const { getSupabase } = await import("@percolator/shared");
 
+/**
+ * Create a chainable Supabase query-builder mock that resolves to `resolvedValue`.
+ */
+function chainable(resolvedValue: any): any {
+  const obj: any = {};
+  const methods = ["select", "eq", "neq", "gte", "lte", "not", "order", "limit", "single", "maybeSingle", "head"];
+  for (const m of methods) {
+    obj[m] = vi.fn(() => obj);
+  }
+  obj.then = (resolve: any) => Promise.resolve(resolvedValue).then(resolve);
+  obj.catch = (reject: any) => Promise.resolve(resolvedValue).catch(reject);
+  obj.finally = (fn: any) => Promise.resolve(resolvedValue).finally(fn);
+  return obj;
+}
+
 describe("crank routes", () => {
   let mockSupabase: any;
 
@@ -31,8 +47,7 @@ describe("crank routes", () => {
     vi.clearAllMocks();
 
     mockSupabase = {
-      from: vi.fn(() => mockSupabase),
-      select: vi.fn(() => mockSupabase),
+      from: vi.fn(() => chainable({ data: [], error: null })),
     };
 
     vi.mocked(getSupabase).mockReturnValue(mockSupabase);
@@ -53,7 +68,7 @@ describe("crank routes", () => {
         },
       ];
 
-      mockSupabase.select.mockResolvedValue({ data: mockMarkets, error: null });
+      mockSupabase.from.mockReturnValue(chainable({ data: mockMarkets, error: null }));
 
       const app = crankStatusRoutes();
       const res = await app.request("/crank/status");
@@ -66,7 +81,7 @@ describe("crank routes", () => {
     });
 
     it("should handle empty markets list", async () => {
-      mockSupabase.select.mockResolvedValue({ data: [], error: null });
+      mockSupabase.from.mockReturnValue(chainable({ data: [], error: null }));
 
       const app = crankStatusRoutes();
       const res = await app.request("/crank/status");
@@ -85,7 +100,7 @@ describe("crank routes", () => {
         },
       ];
 
-      mockSupabase.select.mockResolvedValue({ data: mockMarkets, error: null });
+      mockSupabase.from.mockReturnValue(chainable({ data: mockMarkets, error: null }));
 
       const app = crankStatusRoutes();
       const res = await app.request("/crank/status");
@@ -98,10 +113,10 @@ describe("crank routes", () => {
     });
 
     it("should handle database errors", async () => {
-      mockSupabase.select.mockResolvedValue({ 
-        data: null, 
-        error: new Error("Database error") 
-      });
+      mockSupabase.from.mockReturnValue(chainable({
+        data: null,
+        error: new Error("Database error"),
+      }));
 
       const app = crankStatusRoutes();
       const res = await app.request("/crank/status");
@@ -120,7 +135,7 @@ describe("crank routes", () => {
         },
       ];
 
-      mockSupabase.select.mockResolvedValue({ data: mockMarkets, error: null });
+      mockSupabase.from.mockReturnValue(chainable({ data: mockMarkets, error: null }));
 
       const app = crankStatusRoutes();
       const res = await app.request("/crank/status");
@@ -141,7 +156,7 @@ describe("crank routes", () => {
         },
       ];
 
-      mockSupabase.select.mockResolvedValue({ data: mockMarkets, error: null });
+      mockSupabase.from.mockReturnValue(chainable({ data: mockMarkets, error: null }));
 
       const app = crankStatusRoutes();
       const res = await app.request("/crank/status");
@@ -170,7 +185,7 @@ describe("crank routes", () => {
         },
       ];
 
-      mockSupabase.select.mockResolvedValue({ data: mockMarkets, error: null });
+      mockSupabase.from.mockReturnValue(chainable({ data: mockMarkets, error: null }));
 
       const app = crankStatusRoutes();
       const res = await app.request("/crank/status");

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getSupabase, createLogger, truncateErrorMessage } from "@percolator/shared";
+import { getSupabase, getNetwork, createLogger, truncateErrorMessage } from "@percolator/shared";
 
 const logger = createLogger("api:crank");
 
@@ -9,8 +9,10 @@ export function crankStatusRoutes(): Hono {
   app.get("/crank/status", async (c) => {
     try {
       const { data, error } = await getSupabase()
-        .from("market_stats")
-        .select("slab_address, last_crank_slot, updated_at");
+        .from("markets_with_stats")
+        .select("slab_address, last_crank_slot, updated_at")
+        .eq("network", getNetwork())
+        .not("slab_address", "is", null);
       if (error) throw error;
       return c.json({ markets: data ?? [] });
     } catch (err) {

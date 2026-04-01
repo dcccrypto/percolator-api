@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getSupabase, createLogger, truncateErrorMessage } from "@percolator/shared";
+import { getSupabase, getNetwork, createLogger, truncateErrorMessage } from "@percolator/shared";
 import { validateSlab } from "../middleware/validateSlab.js";
 
 const logger = createLogger("api:prices");
@@ -10,8 +10,10 @@ export function priceRoutes(): Hono {
   app.get("/prices/markets", async (c) => {
     try {
       const { data, error } = await getSupabase()
-        .from("market_stats")
-        .select("slab_address, last_price, mark_price, index_price, updated_at");
+        .from("markets_with_stats")
+        .select("slab_address, last_price, mark_price, index_price, updated_at")
+        .eq("network", getNetwork())
+        .not("slab_address", "is", null);
       if (error) throw error;
       return c.json({ markets: data ?? [] });
     } catch (err) {

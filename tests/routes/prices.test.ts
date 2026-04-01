@@ -5,6 +5,7 @@ import { priceRoutes } from "../../src/routes/prices.js";
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
   getConnection: vi.fn(),
+  getNetwork: vi.fn(() => "devnet"),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -34,6 +35,7 @@ describe("prices routes", () => {
       from: vi.fn(() => mockSupabase),
       select: vi.fn(() => mockSupabase),
       eq: vi.fn(() => mockSupabase),
+      not: vi.fn(() => mockSupabase),
       order: vi.fn(() => mockSupabase),
       limit: vi.fn(() => mockSupabase),
     };
@@ -60,7 +62,7 @@ describe("prices routes", () => {
         },
       ];
 
-      mockSupabase.select.mockResolvedValue({ data: mockMarkets, error: null });
+      mockSupabase.not.mockResolvedValue({ data: mockMarkets, error: null });
 
       const app = priceRoutes();
       const res = await app.request("/prices/markets");
@@ -72,7 +74,7 @@ describe("prices routes", () => {
     });
 
     it("should handle database errors", async () => {
-      mockSupabase.select.mockResolvedValue({ 
+      mockSupabase.not.mockResolvedValue({ 
         data: null, 
         error: new Error("Database error") 
       });
@@ -86,7 +88,7 @@ describe("prices routes", () => {
     });
 
     it("should handle empty markets list", async () => {
-      mockSupabase.select.mockResolvedValue({ data: [], error: null });
+      mockSupabase.not.mockResolvedValue({ data: [], error: null });
 
       const app = priceRoutes();
       const res = await app.request("/prices/markets");
