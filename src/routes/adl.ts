@@ -54,6 +54,16 @@ import { isBlockedSlab } from "../middleware/validateSlab.js";
 
 const logger = createLogger("api:adl");
 
+// ─── ADL result cache (prevents RPC amplification) ────────────────────────
+const ADL_CACHE_TTL_MS = 15_000; // 15 seconds
+const ADL_CACHE_MAX_ENTRIES = 100;
+const adlCache = new Map<string, { data: any; fetchedAt: number }>();
+
+/** @internal Reset cache — used by tests to ensure isolation */
+export function __resetAdlCache(): void {
+  adlCache.clear();
+}
+
 // ─── constants / tunables ─────────────────────────────────────────────────
 
 /**
@@ -144,6 +154,12 @@ export function adlRoutes(): Hono {
       return c.json({ error: "Invalid slab address" }, 400);
     }
 
+    // Check cache to avoid redundant expensive RPC calls
+    const cached = adlCache.get(slab);
+    if (cached && Date.now() - cached.fetchedAt < ADL_CACHE_TTL_MS) {
+      return c.json(cached.data, 200, { "X-Cache": "HIT" });
+    }
+
     try {
       new PublicKey(slab); // throws if invalid
     } catch {
@@ -214,7 +230,7 @@ export function adlRoutes(): Hono {
       }
     }
 
-    return c.json({
+    const result = {
       slabAddress: slab,
       pnlPosTot: pnlPosTot.toString(),
       maxPnlCap: maxPnlCap.toString(),
@@ -227,7 +243,16 @@ export function adlRoutes(): Hono {
       adlNeeded,
       excess,
       rankings,
-    });
+    };
+
+    // Cache the result
+    if (adlCache.size >= ADL_CACHE_MAX_ENTRIES) {
+      const oldestKey = adlCache.keys().next().value;
+      if (oldestKey !== undefined) adlCache.delete(oldestKey);
+    }
+    adlCache.set(slab, { data: result, fetchedAt: Date.now() });
+
+    return c.json(result, 200, { "X-Cache": "MISS" });
   });
 
   return app;

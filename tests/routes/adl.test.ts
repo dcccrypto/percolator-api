@@ -2,7 +2,7 @@
  * Tests for ADL rankings route — PERC-8293 (T11)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { adlRoutes } from "../../src/routes/adl.js";
+import { adlRoutes, __resetAdlCache } from "../../src/routes/adl.js";
 
 // ── mocks ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +63,7 @@ async function makeRequest(queryString: string) {
 describe("GET /api/adl/rankings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetAdlCache();
     vi.mocked(getConnection).mockReturnValue({} as any);
     vi.mocked(fetchSlab).mockResolvedValue(new Uint8Array(32));
     vi.mocked(parseEngine).mockReturnValue(makeEngine() as any);
