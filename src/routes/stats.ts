@@ -9,7 +9,7 @@
  * - 24h trade count
  */
 import { Hono } from "hono";
-import { getSupabase, getNetwork, createLogger } from "@percolator/shared";
+import { getSupabase, getNetwork, createLogger, truncateErrorMessage } from "@percolator/shared";
 
 const logger = createLogger("api:stats");
 
@@ -83,7 +83,7 @@ export function statsRoutes(): Hono {
         trades24h: trades24h ?? 0,
       });
     } catch (err) {
-      logger.error("Error fetching platform stats", { error: err });
+      logger.error("Error fetching platform stats", { error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
       return c.json({ 
         error: "Failed to fetch platform statistics",
         ...(process.env.NODE_ENV !== "production" && { details: err instanceof Error ? err.message : String(err) })
