@@ -10,7 +10,11 @@ export function docsRoutes(): Hono {
   const app = new Hono();
 
   // Serve Swagger UI at /docs
+  // Hash of the inline init script — override the global CSP to allow it without 'unsafe-inline'
+  const INIT_SCRIPT_HASH = "sha256-D1qu74KZvpXsEKUAyhuFNctjeQq+07qFNQHj4fSjFqQ=";
+
   app.get("/docs", (c) => {
+    c.header("Content-Security-Policy", `script-src 'self' unpkg.com '${INIT_SCRIPT_HASH}'; style-src 'self' unpkg.com 'unsafe-inline'`);
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
