@@ -58,6 +58,11 @@ const ADL_CACHE_TTL_MS = 15_000; // 15 seconds
 const ADL_CACHE_MAX_ENTRIES = 100;
 const adlCache = new Map<string, { data: any; fetchedAt: number }>();
 
+/** @internal Reset cache — used by tests to ensure isolation */
+export function __resetAdlCache(): void {
+  adlCache.clear();
+}
+
 // ─── constants / tunables ─────────────────────────────────────────────────
 
 /**
