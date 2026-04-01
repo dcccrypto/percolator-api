@@ -711,6 +711,18 @@ export function setupWebSocket(server: Server): WebSocketServer {
               client.authTimeout = undefined;
             }
             
+            if (!client.initiallyAuthenticated) {
+              const unauthCount = unauthenticatedConnectionsPerIp.get(client.ip) || 1;
+              if (unauthCount <= 1) {
+                unauthenticatedConnectionsPerIp.delete(client.ip);
+              } else {
+                unauthenticatedConnectionsPerIp.set(client.ip, unauthCount - 1);
+              }
+              const ipCount = connectionsPerIp.get(client.ip) || 0;
+              connectionsPerIp.set(client.ip, ipCount + 1);
+              client.initiallyAuthenticated = true;
+            }
+            
             logger.info("Client authenticated via message", { 
               ip: client.ip, 
               slab: client.authenticatedSlab 
