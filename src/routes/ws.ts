@@ -215,8 +215,8 @@ const metrics: Metrics = {
 // Reset rate metrics every minute for messages/sec and bytes/sec
 setInterval(() => {
   const now = Date.now();
-  const elapsedSec = (now - metrics.lastResetTime) / 1000;
-  
+  const elapsedSec = (now - metrics.lastResetTime) / 1000 || 1;
+
   logger.info("WebSocket metrics", {
     totalConnections: metrics.totalConnections,
     messagesPerSec: (metrics.messagesReceived / elapsedSec).toFixed(2),
@@ -412,8 +412,8 @@ function flushPriceUpdate(slabAddress: string): void {
  */
 export function getWebSocketMetrics(): any {
   const now = Date.now();
-  const elapsedSec = (now - metrics.lastResetTime) / 1000;
-  
+  const elapsedSec = (now - metrics.lastResetTime) / 1000 || 1;
+
   return {
     totalConnections: metrics.totalConnections,
     connectionsPerSlab: Object.fromEntries(metrics.connectionsPerSlab),
