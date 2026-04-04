@@ -77,7 +77,16 @@ async function getTopPool(mint: string): Promise<string | null> {
     const pools = json?.data;
     if (!Array.isArray(pools) || pools.length === 0) return null;
     // GeckoTerminal pool ids are prefixed with "solana_"
-    return pools[0]?.id?.replace("solana_", "") ?? null;
+    const raw = pools[0]?.id?.replace("solana_", "") ?? null;
+    if (!raw) return null;
+    // Validate the pool address is alphanumeric and reasonable length before
+    // using it in a URL — defends against supply-chain injection if
+    // GeckoTerminal is compromised or returns unexpected data.
+    if (!/^[A-Za-z0-9]{32,44}$/.test(raw)) {
+      logger.warn("getTopPool returned invalid pool address", { mint, raw });
+      return null;
+    }
+    return raw;
   } catch (err) {
     logger.warn("getTopPool fetch error", { mint, err });
     return null;
