@@ -11,6 +11,7 @@
 import { Hono } from "hono";
 import { validateSlab } from "../middleware/validateSlab.js";
 import { cacheMiddleware } from "../middleware/cache.js";
+import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
 import { 
   getFundingHistory, 
   getFundingHistorySince,
@@ -51,46 +52,46 @@ export function fundingRoutes(): Hono {
    * NOTE: This must come BEFORE /funding/:slab to avoid :slab matching "global"
    */
   app.get("/funding/global", async (c) => {
-    try {
-      const { data: allStats, error } = await getSupabase()
-        .from("markets_with_stats")
-        .select("slab_address, funding_rate, net_lp_pos")
-        .eq("network", getNetwork())
-        .not("slab_address", "is", null);
+    const SLOTS_PER_HOUR = 9000;
+    const SLOTS_PER_DAY = 216000;
 
-      if (error) throw error;
+    const result = await withDbCacheFallback(
+      "funding:global",
+      async () => {
+        const { data: allStats, error } = await getSupabase()
+          .from("markets_with_stats")
+          .select("slab_address, funding_rate, net_lp_pos")
+          .eq("network", getNetwork())
+          .not("slab_address", "is", null);
 
-      const SLOTS_PER_HOUR = 9000;
-      const SLOTS_PER_DAY = 216000;
+        if (error) throw error;
 
-      // GH#1459: Filter blocked slabs from the global response.
-      // validateSlab middleware only runs on /:slab routes; the global endpoint
-      // queries all market_stats rows and previously exposed blocked slabs
-      // (8eFFEFBY, 3bmCyPee, 3YDqCJGz, 3ZKKwsK) with phantom netLpPosition values.
-      const markets = (allStats ?? [])
-        .filter((stats) => !isBlockedSlab(stats.slab_address))
-        .map((stats) => {
-          const rateBps = sanitizeFundingRateBps(Number(stats.funding_rate ?? 0));
-          return {
-            slabAddress: stats.slab_address,
-            currentRateBpsPerSlot: rateBps,
-            hourlyRatePercent: Number(((rateBps / 10000.0) * SLOTS_PER_HOUR).toFixed(6)),
-            dailyRatePercent: Number(((rateBps / 10000.0) * SLOTS_PER_DAY).toFixed(4)),
-            netLpPosition: stats.net_lp_pos ?? "0",
-          };
-        });
+        // GH#1459: Filter blocked slabs from the global response.
+        // validateSlab middleware only runs on /:slab routes; the global endpoint
+        // queries all market_stats rows and previously exposed blocked slabs
+        // (8eFFEFBY, 3bmCyPee, 3YDqCJGz, 3ZKKwsK) with phantom netLpPosition values.
+        const markets = (allStats ?? [])
+          .filter((stats) => !isBlockedSlab(stats.slab_address))
+          .map((stats) => {
+            const rateBps = sanitizeFundingRateBps(Number(stats.funding_rate ?? 0));
+            return {
+              slabAddress: stats.slab_address,
+              currentRateBpsPerSlot: rateBps,
+              hourlyRatePercent: Number(((rateBps / 10000.0) * SLOTS_PER_HOUR).toFixed(6)),
+              dailyRatePercent: Number(((rateBps / 10000.0) * SLOTS_PER_DAY).toFixed(4)),
+              netLpPosition: stats.net_lp_pos ?? "0",
+            };
+          });
 
-      return c.json({
-        count: markets.length,
-        markets,
-      });
-    } catch (err) {
-      logger.error("Error fetching global funding data", { error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
-        return c.json({
-          error: "Failed to fetch global funding data",
-          ...(process.env.NODE_ENV !== "production" && { details: truncateErrorMessage(err instanceof Error ? err.message : String(err), 200) })
-        }, 500);
-    }
+        return { count: markets.length, markets };
+      },
+      c
+    );
+
+    // withDbCacheFallback returns a Response on failure (503 with stale data or error)
+    if (result instanceof Response) return result;
+
+    return c.json(result);
   });
 
   /**
