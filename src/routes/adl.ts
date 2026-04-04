@@ -197,8 +197,8 @@ export function adlRoutes(): Hono {
     }
 
     const pnlPosTot = engine.pnlPosTot;
-    // maxPnlCap is available in SDK ≥47e3799; fallback to 0n disables cap-exceeded trigger
-    const maxPnlCap: bigint = (cfg as any).maxPnlCap ?? 0n;
+    // maxPnlCap fallback to 0n disables cap-exceeded trigger on older SDK builds
+    const maxPnlCap: bigint = cfg.maxPnlCap ?? 0n;
     const insBalance = engine.insuranceFund.balance;
     const insFeeRevenue = engine.insuranceFund.feeRevenue;
 
