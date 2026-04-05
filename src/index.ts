@@ -143,8 +143,12 @@ app.use("*", async (c, next) => {
     }
   }
 
-  // Prevent CDNs/proxies from caching error responses
-  if (c.res.status >= 400) {
+  // Prevent CDNs/proxies from caching responses by default.
+  // Financial data endpoints (prices, funding, trades, stats) must not be
+  // served stale by intermediate proxies.  Endpoints that intentionally
+  // cache (e.g. /chart, cacheMiddleware routes) set their own
+  // Cache-Control header which will already be present on the response.
+  if (!c.res.headers.has("Cache-Control")) {
     c.header("Cache-Control", "no-store");
   }
 });
