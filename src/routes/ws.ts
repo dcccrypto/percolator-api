@@ -831,7 +831,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
             
             // Verify slab binding if client is authenticated with a specific slab
             if (client.authenticatedSlab && client.authenticatedSlab !== sanitized) {
-              errors.push(`Token is bound to slab ${client.authenticatedSlab}, cannot subscribe to ${sanitized}`);
+              errors.push("Cannot subscribe — token is bound to a different market");
               logger.warn("Slab binding violation attempt", { 
                 ip: client.ip, 
                 authenticatedSlab: client.authenticatedSlab, 
@@ -849,20 +849,20 @@ export function setupWebSocket(server: Server): WebSocketServer {
             
             // Cap global subscriptions to prevent DoS
             if (globalSubscriptionCount >= MAX_GLOBAL_SUBSCRIPTIONS) {
-              errors.push(`Server subscription limit reached (${MAX_GLOBAL_SUBSCRIPTIONS})`);
+              errors.push("Server subscription limit reached");
               break;
             }
             
             // Cap subscriptions per client
             if (client.subscriptions.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) {
-              errors.push(`Max ${MAX_SUBSCRIPTIONS_PER_CLIENT} subscriptions per connection`);
+              errors.push("Subscription limit per connection reached");
               break;
             }
             
             // Check per-slab connection limit
             const slabClients = connectionsPerSlab.get(sanitized);
             if (slabClients && slabClients.size >= MAX_CONNECTIONS_PER_SLAB) {
-              errors.push(`Max ${MAX_CONNECTIONS_PER_SLAB} connections for slab ${sanitized}`);
+              errors.push("Connection limit for this market reached");
               continue;
             }
             
@@ -935,9 +935,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
               authenticatedSlab: client.authenticatedSlab, 
               requestedSlab: sanitized 
             });
-            ws.send(JSON.stringify({ 
-              type: "error", 
-              message: `Token is bound to slab ${client.authenticatedSlab}, cannot subscribe to ${sanitized}` 
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Cannot subscribe — token is bound to a different market"
             }));
             return;
           }
@@ -945,7 +945,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
           // Check per-slab connection limit before subscribing
           const slabClients = connectionsPerSlab.get(sanitized);
           if (slabClients && slabClients.size >= MAX_CONNECTIONS_PER_SLAB) {
-            ws.send(JSON.stringify({ type: "error", message: `Max ${MAX_CONNECTIONS_PER_SLAB} connections for this market` }));
+            ws.send(JSON.stringify({ type: "error", message: "Connection limit for this market reached" }));
             return;
           }
 
