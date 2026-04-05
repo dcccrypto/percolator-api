@@ -441,29 +441,33 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
   // Broadcast price updates to subscribed clients (with batching)
   eventBus.on("price.updated", (payload: any) => {
-    const slabAddress = payload.slabAddress;
-    
-    // Check if anyone is subscribed to price updates for this slab
-    const slabClients = connectionsPerSlab.get(slabAddress);
-    if (!slabClients || slabClients.size === 0) {
-      return; // No subscribers, skip
+    try {
+      const slabAddress = payload.slabAddress;
+
+      // Check if anyone is subscribed to price updates for this slab
+      const slabClients = connectionsPerSlab.get(slabAddress);
+      if (!slabClients || slabClients.size === 0) {
+        return; // No subscribers, skip
+      }
+
+      // Store pending update (overwrites previous if exists)
+      pendingPriceUpdates.set(slabAddress, {
+        slabAddress,
+        data: payload.data,
+        timestamp: payload.timestamp,
+      });
+
+      // If no timer exists for this slab, create one
+      if (!priceUpdateTimers.has(slabAddress)) {
+        const timer = setTimeout(() => {
+          flushPriceUpdate(slabAddress);
+        }, PRICE_BATCH_INTERVAL_MS);
+        priceUpdateTimers.set(slabAddress, timer);
+      }
+      // Otherwise, the existing timer will flush the latest update
+    } catch (err) {
+      logger.error("Error in price.updated handler", { error: err instanceof Error ? err.message : String(err) });
     }
-    
-    // Store pending update (overwrites previous if exists)
-    pendingPriceUpdates.set(slabAddress, {
-      slabAddress,
-      data: payload.data,
-      timestamp: payload.timestamp,
-    });
-    
-    // If no timer exists for this slab, create one
-    if (!priceUpdateTimers.has(slabAddress)) {
-      const timer = setTimeout(() => {
-        flushPriceUpdate(slabAddress);
-      }, PRICE_BATCH_INTERVAL_MS);
-      priceUpdateTimers.set(slabAddress, timer);
-    }
-    // Otherwise, the existing timer will flush the latest update
   });
 
   // Broadcast trade events to subscribed clients
