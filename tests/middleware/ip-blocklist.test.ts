@@ -105,6 +105,38 @@ describe("ipBlocklist middleware", () => {
     expect(res.status).toBe(403);
   });
 
+  it("does NOT use x-real-ip when x-forwarded-for is absent", async () => {
+    process.env.TRUSTED_PROXY_DEPTH = "1";
+    const fn = await loadMiddlewareWithEnv("88.97.223.158");
+    const app = makeApp(fn);
+
+    // Attacker sets x-real-ip to a clean address to bypass the blocklist.
+    // Without x-forwarded-for the middleware must fall back to the socket
+    // address (or "unknown"), NOT the spoofable x-real-ip header.
+    const req = new Request("http://localhost/test", {
+      headers: { "x-real-ip": "9.9.9.9" }, // no x-forwarded-for
+    });
+    const res = await app.request(req);
+    // Should NOT be blocked because the socket address is not on the list
+    // (prior to the fix it would have used x-real-ip=9.9.9.9 as the client IP)
+    expect(res.status).toBe(200);
+  });
+
+  it("blocks via socket address not x-real-ip when x-forwarded-for is absent", async () => {
+    process.env.TRUSTED_PROXY_DEPTH = "1";
+    // Block "unknown" — the fallback IP when socket address is unavailable (test env)
+    const fn = await loadMiddlewareWithEnv("unknown");
+    const app = makeApp(fn);
+
+    // Even with a clean x-real-ip, the middleware should resolve to socket
+    // address ("unknown" in test env) and block it.
+    const req = new Request("http://localhost/test", {
+      headers: { "x-real-ip": "9.9.9.9" }, // no x-forwarded-for
+    });
+    const res = await app.request(req);
+    expect(res.status).toBe(403);
+  });
+
   it("allows spoofed IPs that are not the trusted client IP (depth=1)", async () => {
     process.env.TRUSTED_PROXY_DEPTH = "1";
     const fn = await loadMiddlewareWithEnv("88.97.223.158");
