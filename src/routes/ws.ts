@@ -726,13 +726,23 @@ export function setupWebSocket(server: Server): WebSocketServer {
             }
             
             if (!client.initiallyAuthenticated) {
+              // Check authenticated connection limit before promoting
+              const ipCount = connectionsPerIp.get(client.ip) || 0;
+              if (ipCount >= MAX_CONNECTIONS_PER_IP) {
+                logger.warn("Auth upgrade rejected — authenticated connection limit reached", {
+                  ip: client.ip,
+                  count: ipCount,
+                });
+                ws.send(JSON.stringify({ type: "error", message: "Authenticated connection limit reached" }));
+                ws.close(1008, "Connection limit reached");
+                return;
+              }
               const unauthCount = unauthenticatedConnectionsPerIp.get(client.ip) || 1;
               if (unauthCount <= 1) {
                 unauthenticatedConnectionsPerIp.delete(client.ip);
               } else {
                 unauthenticatedConnectionsPerIp.set(client.ip, unauthCount - 1);
               }
-              const ipCount = connectionsPerIp.get(client.ip) || 0;
               connectionsPerIp.set(client.ip, ipCount + 1);
               client.initiallyAuthenticated = true;
             }
