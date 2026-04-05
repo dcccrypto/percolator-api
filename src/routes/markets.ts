@@ -24,7 +24,7 @@ export function marketRoutes(): Hono {
         // Filter by network to prevent devnet/mainnet data mixing (PERC-8192).
         const { data, error } = await getSupabase()
           .from("markets_with_stats")
-          .select("*")
+          .select("slab_address, mint_address, symbol, name, decimals, deployer, oracle_authority, initial_price_e6, max_leverage, trading_fee_bps, lp_collateral, matcher_context, status, logo_url, created_at, updated_at, total_open_interest, total_accounts, last_crank_slot, last_price, mark_price, index_price, funding_rate, net_lp_pos")
           .eq("network", getNetwork())
           .not("slab_address", "is", null);
 
@@ -83,7 +83,7 @@ export function marketRoutes(): Hono {
     try {
       const { data, error } = await getSupabase()
         .from("markets_with_stats")
-        .select("*")
+        .select("slab_address, total_open_interest, total_accounts, last_crank_slot, last_price, mark_price, index_price, funding_rate, net_lp_pos, updated_at")
         .eq("network", getNetwork())
         .not("slab_address", "is", null);
       if (error) throw error;
@@ -102,7 +102,7 @@ export function marketRoutes(): Hono {
     try {
       const { data, error } = await getSupabase()
         .from("market_stats")
-        .select("*")
+        .select("slab_address, total_open_interest, total_accounts, last_crank_slot, last_price, mark_price, index_price, funding_rate, net_lp_pos, updated_at")
         .eq("slab_address", slab)
         .single();
       if (error && error.code !== "PGRST116") throw error;
