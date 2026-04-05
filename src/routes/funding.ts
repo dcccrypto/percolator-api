@@ -152,9 +152,9 @@ export function fundingRoutes(): Hono {
       const SLOTS_PER_YEAR = 78840000;
 
       const rateBps = sanitizeFundingRateBps(Number(currentRateBpsPerSlot));
-      const hourlyRatePercent = (rateBps / 10000.0) * SLOTS_PER_HOUR;
-      const dailyRatePercent = (rateBps / 10000.0) * SLOTS_PER_DAY;
-      const annualizedPercent = (rateBps / 10000.0) * SLOTS_PER_YEAR;
+      const hourlyRatePercent = Number(((rateBps / 10000.0) * SLOTS_PER_HOUR).toFixed(6));
+      const dailyRatePercent = Number(((rateBps / 10000.0) * SLOTS_PER_DAY).toFixed(4));
+      const annualizedPercent = Number(((rateBps / 10000.0) * SLOTS_PER_YEAR).toFixed(2));
 
       // Fetch 24h funding history — gracefully degrade if table is unavailable
       const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
