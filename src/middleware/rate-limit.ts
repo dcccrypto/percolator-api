@@ -57,7 +57,14 @@ function getClientIp(c: Context): string {
     return normalizeIp(ips[idx] || "unknown");
   }
 
-  return normalizeIp(c.req.header("x-real-ip") ?? "unknown");
+  // x-forwarded-for absent behind a proxy — fall back to socket address
+  // rather than the spoofable x-real-ip header (see comment on line 48).
+  try {
+    const info = getConnInfo(c);
+    return normalizeIp(info.remote.address ?? "unknown");
+  } catch {
+    return "unknown";
+  }
 }
 
 interface RateLimitResult {
