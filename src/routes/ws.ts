@@ -719,6 +719,22 @@ export function setupWebSocket(server: Server): WebSocketServer {
         
         // Handle auth message
         if (msg.type === "auth" && msg.token) {
+          // Reject re-auth with a different slab binding — existing subscriptions
+          // would remain for the old slab, breaking the slab-binding invariant.
+          if (client.authenticated && client.authenticatedSlab) {
+            const peek = verifyWsToken(msg.token);
+            const newSlab = peek.isValid ? (peek.slabAddress || undefined) : undefined;
+            if (newSlab && newSlab !== client.authenticatedSlab) {
+              logger.warn("Rejected slab rebinding attempt", {
+                ip: client.ip,
+                currentSlab: client.authenticatedSlab,
+                requestedSlab: newSlab,
+              });
+              ws.send(JSON.stringify({ type: "error", message: "Already authenticated — disconnect to change slab binding" }));
+              return;
+            }
+          }
+
           const tokenVerification = verifyWsToken(msg.token);
           if (tokenVerification.isValid) {
             client.authenticated = true;
