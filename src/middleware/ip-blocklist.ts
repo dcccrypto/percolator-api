@@ -27,7 +27,7 @@ const RAW_BLOCKLIST = (process.env.IP_BLOCKLIST ?? "")
   .filter(Boolean);
 
 if (RAW_BLOCKLIST.length > 0) {
-  logger.info("IP blocklist loaded", { count: RAW_BLOCKLIST.length, entries: RAW_BLOCKLIST });
+  logger.info("IP blocklist loaded", { count: RAW_BLOCKLIST.length });
 } else {
   logger.info("IP blocklist is empty — no IPs will be blocked");
 }
