@@ -1,5 +1,5 @@
 onlyBuiltDependencies:
-  - "@percolator/sdk"
+  - "@percolatorct/sdk"
   - "@percolator/shared"
   - esbuild
   - bufferutil

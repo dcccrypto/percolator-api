@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { PublicKey } from "@solana/web3.js";
-import { resolvePrice, type PriceRouterResult } from "@percolator/sdk";
+import { resolvePrice, type PriceRouterResult } from "@percolatorct/sdk";
 import { createLogger } from "@percolator/shared";
 
 const logger = createLogger("api:oracle-router");

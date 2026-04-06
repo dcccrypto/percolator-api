@@ -17,7 +17,7 @@ vi.mock("@percolator/shared", () => ({
   sanitizeSlabAddress: vi.fn((addr: string) => addr),
 }));
 
-vi.mock("@percolator/sdk", () => ({
+vi.mock("@percolatorct/sdk", () => ({
   fetchSlab: vi.fn(),
   parseEngine: vi.fn(),
   parseConfig: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock("@percolator/sdk", () => ({
 
 const { getConnection } = await import("@percolator/shared");
 const { fetchSlab, parseEngine, parseConfig, parseAllAccounts } =
-  await import("@percolator/sdk");
+  await import("@percolatorct/sdk");
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
