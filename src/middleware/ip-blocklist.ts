@@ -62,9 +62,17 @@ function parseEntry(entry: string): ParsedEntry | null {
   return { type: "exact", raw: entry, ip: entry };
 }
 
-const PARSED_BLOCKLIST: ParsedEntry[] = RAW_BLOCKLIST.map(parseEntry).filter(
-  (e): e is ParsedEntry => e !== null
-);
+const PARSED_BLOCKLIST: ParsedEntry[] = RAW_BLOCKLIST.map((entry) => {
+  const parsed = parseEntry(entry);
+  if (parsed === null) {
+    logger.warn("Invalid IP blocklist entry dropped", { entry });
+  }
+  return parsed;
+}).filter((e): e is ParsedEntry => e !== null);
+
+if (RAW_BLOCKLIST.length > 0 && PARSED_BLOCKLIST.length === 0) {
+  logger.warn("All IP blocklist entries failed to parse — no IPs will be blocked");
+}
 
 function isBlocked(clientIp: string): boolean {
   if (PARSED_BLOCKLIST.length === 0) return false;
