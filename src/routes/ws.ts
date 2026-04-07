@@ -1019,7 +1019,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
         }
       } catch (err) {
         logger.warn("Error processing WS message", { ip: client.ip, error: err });
-        // Ignore malformed messages
+        if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_BUFFER_BYTES) {
+          ws.send(JSON.stringify({ type: "error", message: "Invalid message" }));
+        }
       }
     });
 
