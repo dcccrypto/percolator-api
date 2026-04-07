@@ -245,18 +245,21 @@ function normalizeIp(ip: string): string {
   return ip;
 }
 
-function getClientIp(req: IncomingMessage): string {
+function getClientIp(req: IncomingMessage): string | null {
   if (WS_PROXY_DEPTH === 0) {
-    return normalizeIp(req.socket.remoteAddress || "unknown");
+    const addr = req.socket.remoteAddress;
+    return addr ? normalizeIp(addr) : null;
   }
 
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string") {
     const ips = forwarded.split(",").map(ip => ip.trim()).filter(Boolean);
     const idx = Math.max(0, ips.length - WS_PROXY_DEPTH);
-    return normalizeIp(ips[idx] || req.socket.remoteAddress || "unknown");
+    const ip = ips[idx] || req.socket.remoteAddress;
+    return ip ? normalizeIp(ip) : null;
   }
-  return normalizeIp(req.socket.remoteAddress || "unknown");
+  const addr = req.socket.remoteAddress;
+  return addr ? normalizeIp(addr) : null;
 }
 
 /**
@@ -538,6 +541,13 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
   wss.on("connection", (ws, req: IncomingMessage) => {
     const clientIp = getClientIp(req);
+
+    // Reject upgrade if IP cannot be determined (fail-closed)
+    if (!clientIp) {
+      logger.warn("Rejected WS upgrade: could not determine client IP");
+      ws.close(1008, "Bad request");
+      return;
+    }
 
     // --- IP blocklist check (mirrors HTTP middleware for WS upgrades) ---
     // WebSocket upgrades bypass Hono middleware, so we enforce the blocklist

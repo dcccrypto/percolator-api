@@ -149,36 +149,21 @@ describe("rate-limit middleware", () => {
       expect(res.status).toBe(200);
     });
 
-    it("should handle missing x-forwarded-for header", async () => {
-      // Should fall back to socket address (not x-real-ip) as IP
-      for (let i = 0; i < 10; i++) {
-        const res = await app.request("/test", { method: "POST" });
-        expect(res.status).toBe(200);
-      }
-
+    it("should reject with 400 when IP cannot be determined", async () => {
+      // Without x-forwarded-for and no socket address (test env),
+      // the rate limiter rejects with 400 (fail-closed)
       const res = await app.request("/test", { method: "POST" });
-      expect(res.status).toBe(429);
+      expect(res.status).toBe(400);
     });
 
-    it("should NOT use x-real-ip when x-forwarded-for is absent", async () => {
-      // x-real-ip is client-spoofable; the rate limiter must ignore it
-      // and fall back to the socket address instead.
-      // Two requests with different x-real-ip values (but no x-forwarded-for)
-      // should share the same bucket because both resolve to the socket address.
-      for (let i = 0; i < 10; i++) {
-        await app.request("/test", {
-          method: "POST",
-          headers: { "x-real-ip": `10.0.0.${i}` },
-        });
-      }
-
-      // 11th request with yet another spoofed x-real-ip — should still be
-      // rate-limited because all requests share the same socket-derived IP.
+    it("should reject with 400 when x-real-ip is present but x-forwarded-for is absent", async () => {
+      // x-real-ip is client-spoofable; without x-forwarded-for and no socket
+      // address, the rate limiter rejects rather than using spoofable headers
       const res = await app.request("/test", {
         method: "POST",
         headers: { "x-real-ip": "10.0.0.99" },
       });
-      expect(res.status).toBe(429);
+      expect(res.status).toBe(400);
     });
   });
 });

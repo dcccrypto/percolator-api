@@ -42,28 +42,31 @@ function normalizeIp(ip: string): string {
   return ip;
 }
 
-function getClientIp(c: Context): string {
+function getClientIp(c: Context): string | null {
   if (PROXY_DEPTH === 0) {
     // No trusted proxy: ignore all forwarded headers, use socket address.
     // x-real-ip is client-spoofable and must not be trusted without a proxy.
     const info = getConnInfo(c);
-    return normalizeIp(info.remote.address ?? "unknown");
+    const addr = info.remote.address;
+    return addr ? normalizeIp(addr) : null;
   }
 
   const forwarded = c.req.header("x-forwarded-for");
   if (forwarded) {
     const ips = forwarded.split(",").map(ip => ip.trim()).filter(Boolean);
     const idx = Math.max(0, ips.length - PROXY_DEPTH);
-    return normalizeIp(ips[idx] || "unknown");
+    const ip = ips[idx];
+    return ip ? normalizeIp(ip) : null;
   }
 
   // x-forwarded-for absent behind a proxy — fall back to socket address
   // rather than the spoofable x-real-ip header (see comment on line 48).
   try {
     const info = getConnInfo(c);
-    return normalizeIp(info.remote.address ?? "unknown");
+    const addr = info.remote.address;
+    return addr ? normalizeIp(addr) : null;
   } catch {
-    return "unknown";
+    return null;
   }
 }
 
@@ -106,6 +109,10 @@ function checkLimit(
 export function readRateLimit() {
   return async (c: Context, next: Next) => {
     const ip = getClientIp(c);
+    if (!ip) {
+      logger.warn("Rejected request: could not determine client IP", { path: c.req.path });
+      return c.json({ error: "Bad request" }, 400);
+    }
     const result = checkLimit(readBuckets, ip, READ_LIMIT);
     
     // Set rate limit headers
@@ -131,6 +138,10 @@ export function readRateLimit() {
 export function writeRateLimit() {
   return async (c: Context, next: Next) => {
     const ip = getClientIp(c);
+    if (!ip) {
+      logger.warn("Rejected request: could not determine client IP", { path: c.req.path, method: c.req.method });
+      return c.json({ error: "Bad request" }, 400);
+    }
     const result = checkLimit(writeBuckets, ip, WRITE_LIMIT);
     
     // Set rate limit headers

@@ -87,12 +87,13 @@ function normalizeIp(ip: string): string {
   return ip;
 }
 
-function getClientIp(c: Context): string {
+function getClientIp(c: Context): string | null {
   if (PROXY_DEPTH === 0) {
     // No trusted proxy: ignore all forwarded headers, use socket address.
     // x-real-ip is client-spoofable and must not be trusted without a proxy.
     const info = getConnInfo(c);
-    return normalizeIp(info.remote.address ?? "unknown");
+    const addr = info.remote.address;
+    return addr ? normalizeIp(addr) : null;
   }
   const forwarded = c.req.header("x-forwarded-for");
   if (forwarded) {
@@ -101,15 +102,17 @@ function getClientIp(c: Context): string {
       .map((ip) => ip.trim())
       .filter(Boolean);
     const idx = Math.max(0, ips.length - PROXY_DEPTH);
-    return normalizeIp(ips[idx] || "unknown");
+    const ip = ips[idx];
+    return ip ? normalizeIp(ip) : null;
   }
   // x-forwarded-for absent behind a proxy — fall back to socket address
   // rather than the spoofable x-real-ip header (see comment on line 93).
   try {
     const info = getConnInfo(c);
-    return normalizeIp(info.remote.address ?? "unknown");
+    const addr = info.remote.address;
+    return addr ? normalizeIp(addr) : null;
   } catch {
-    return "unknown";
+    return null;
   }
 }
 
@@ -118,6 +121,13 @@ export function ipBlocklist() {
     if (PARSED_BLOCKLIST.length === 0) return next();
 
     const ip = getClientIp(c);
+    if (!ip) {
+      logger.warn("Rejected request: could not determine client IP for blocklist check", {
+        path: c.req.path,
+        method: c.req.method,
+      });
+      return c.json({ error: "Bad request" }, 400);
+    }
     if (isBlocked(ip)) {
       logger.warn("Blocked request from blocklisted IP", {
         ip,
