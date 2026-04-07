@@ -44,6 +44,10 @@ if (process.env.NODE_ENV === "production" && !process.env.CORS_ORIGINS) {
 }
 
 logger.info("CORS allowed origins", { origins: allowedOrigins });
+const wildcardOrigins = allowedOrigins.filter(o => o.startsWith("https://*."));
+if (wildcardOrigins.length > 0) {
+  logger.warn("Wildcard CORS patterns configured — any matching subdomain will be allowed", { patterns: wildcardOrigins });
+}
 
 app.use("*", cors({
   origin: (origin) => {
@@ -61,12 +65,12 @@ app.use("*", cors({
         const wildcardDomain = allowed.slice("https://*.".length); // e.g. "vercel.app"
         try {
           const originUrl = new URL(origin);
-          if (
-            originUrl.protocol === "https:" &&
-            originUrl.hostname.endsWith("." + wildcardDomain) &&
-            originUrl.hostname.length > wildcardDomain.length + 1
-          ) {
-            return origin;
+          if (originUrl.protocol === "https:" && originUrl.hostname.endsWith("." + wildcardDomain)) {
+            const subdomain = originUrl.hostname.slice(0, -(wildcardDomain.length + 1));
+            // Validate single DNS label: alphanumeric + hyphens, 1-63 chars, no leading/trailing hyphens
+            if (/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain)) {
+              return origin;
+            }
           }
         } catch {
           // Malformed origin — reject
