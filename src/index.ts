@@ -250,6 +250,10 @@ if (!process.env.NODE_ENV || !validNodeEnvs.includes(process.env.NODE_ENV)) {
 }
 
 const port = Number(process.env.API_PORT ?? 3001);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  logger.error("Invalid API_PORT: must be an integer between 1 and 65535", { apiPort: process.env.API_PORT });
+  process.exit(1);
+}
 
 // Database connectivity pre-flight check with retry
 const DB_VERIFY_MAX_RETRIES = 3;
