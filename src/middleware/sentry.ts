@@ -49,42 +49,47 @@ export function sentryMiddleware(): MiddlewareHandler {
     const dsn = process.env.SENTRY_DSN;
     if (!dsn) return next();
 
-    return Sentry.withScope(async (scope) => {
-      // Set request context
-      scope.setTag("http.method", c.req.method);
-      scope.setTag("http.path", c.req.path);
-      
-      // Set a hashed API key fingerprint as pseudonymous user ID.
-      // Avoid sending any raw key material (even a prefix) to third-party services.
-      const apiKey = c.req.header("x-api-key");
-      if (apiKey) {
-        const { createHash } = await import("node:crypto");
-        const fingerprint = createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
-        scope.setUser({ id: `api-key:${fingerprint}` });
-      }
+    try {
+      return Sentry.withScope(async (scope) => {
+        // Set request context
+        scope.setTag("http.method", c.req.method);
+        scope.setTag("http.path", c.req.path);
 
-      try {
-        await next();
-
-        // Tag response status
-        const status = c.res.status;
-        scope.setTag("http.status_code", String(status));
-
-        // Report 5xx errors
-        if (status >= 500) {
-          Sentry.captureMessage(`API ${status} on ${c.req.method} ${c.req.path}`, "error");
+        // Set a hashed API key fingerprint as pseudonymous user ID.
+        // Avoid sending any raw key material (even a prefix) to third-party services.
+        const apiKey = c.req.header("x-api-key");
+        if (apiKey) {
+          const { createHash } = await import("node:crypto");
+          const fingerprint = createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
+          scope.setUser({ id: `api-key:${fingerprint}` });
         }
-      } catch (err) {
-        // Capture unhandled route errors
-        Sentry.captureException(err, {
-          tags: {
-            endpoint: c.req.path,
-            method: c.req.method,
-          },
-        });
-        throw err; // Re-throw so Hono's onError handler still fires
-      }
-    });
+
+        try {
+          await next();
+
+          // Tag response status
+          const status = c.res.status;
+          scope.setTag("http.status_code", String(status));
+
+          // Report 5xx errors
+          if (status >= 500) {
+            Sentry.captureMessage(`API ${status} on ${c.req.method} ${c.req.path}`, "error");
+          }
+        } catch (err) {
+          // Capture unhandled route errors
+          Sentry.captureException(err, {
+            tags: {
+              endpoint: c.req.path,
+              method: c.req.method,
+            },
+          });
+          throw err; // Re-throw so Hono's onError handler still fires
+        }
+      });
+    } catch {
+      // Sentry failure should not crash the request
+      return next();
+    }
   };
 }
 
