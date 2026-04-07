@@ -27,12 +27,20 @@ export function priceRoutes(): Hono {
   app.get("/prices/:slab", validateSlab, async (c) => {
     const slab = c.req.param("slab");
     try {
+      // Return prices in ascending order (oldest→newest) so the chart component
+      // can feed them directly into lightweight-charts setData(), which requires
+      // strictly ascending timestamps. Previously returned DESC (newest first) which
+      // caused aggregateCandles to produce DESC-ordered candles → lwc silently failed.
+      //
+      // Limit raised from 100 → 1500: at the 2-min indexer cadence, 100 rows covers
+      // only ~3.3 hours — insufficient for the "1d" and "4h" chart timeframes.
+      // 1500 rows = ~50 hours of history at 2-min intervals (covers any visible timeframe).
       const { data, error } = await getSupabase()
         .from("oracle_prices")
         .select("*")
         .eq("slab_address", slab)
-        .order("timestamp", { ascending: false })
-        .limit(100);
+        .order("timestamp", { ascending: true })
+        .limit(1500);
       if (error) throw error;
       return c.json({ prices: data ?? [] });
     } catch (err) {
