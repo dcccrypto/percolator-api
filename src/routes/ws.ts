@@ -651,7 +651,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
           logger.warn("Client failed to authenticate within timeout", { ip: clientIp });
           // Record auth failure for rate limiting (issue #839: flood protection)
           recordAuthFailure(clientIp);
-          ws.close(1008, "Authentication required");
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.close(1008, "Authentication required");
+          }
         }
       }, AUTH_TIMEOUT_MS);
     }
@@ -673,7 +675,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
         if (client.pongTimeout) {
           clearTimeout(client.pongTimeout);
         }
-        ws.terminate();
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.terminate();
+        }
         return;
       }
       
@@ -685,7 +689,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
         if (!client.isAlive) {
           logger.warn("Pong timeout exceeded", { ip: client.ip });
           clearInterval(client.pingInterval);
-          ws.terminate();
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.terminate();
+          }
         }
       }, PONG_TIMEOUT_MS);
     }, HEARTBEAT_INTERVAL_MS);
