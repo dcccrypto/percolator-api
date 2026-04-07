@@ -43,6 +43,16 @@ if (process.env.NODE_ENV === "production" && !process.env.CORS_ORIGINS) {
   process.exit(1);
 }
 
+// Supabase credentials must be configured
+if (!process.env.SUPABASE_URL) {
+  logger.error("SUPABASE_URL environment variable is required");
+  process.exit(1);
+}
+if (!process.env.SUPABASE_SERVICE_KEY) {
+  logger.error("SUPABASE_SERVICE_KEY environment variable is required");
+  process.exit(1);
+}
+
 logger.info("CORS allowed origins", { origins: allowedOrigins });
 
 app.use("*", cors({
