@@ -361,5 +361,13 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("uncaughtException", (err) => {
+  logger.error("Uncaught exception", { error: err.message, stack: err.stack });
+  shutdown("uncaughtException");
+});
+process.on("unhandledRejection", (reason) => {
+  logger.error("Unhandled rejection", { error: reason instanceof Error ? reason.message : String(reason) });
+  shutdown("unhandledRejection");
+});
 
 export { app };
