@@ -887,7 +887,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
                     .single();
 
                   if (stats && stats.last_price) {
-                    if (ws.bufferedAmount <= MAX_BUFFER_BYTES) {
+                    if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_BUFFER_BYTES) {
                       ws.send(
                         JSON.stringify({
                           type: "price",
