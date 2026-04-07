@@ -113,15 +113,19 @@ export function cacheMiddleware(ttlSeconds: number) {
     
     // Only cache successful JSON responses
     if (c.res.status === 200 && c.res.headers.get("Content-Type")?.includes("application/json")) {
-      const body = await c.res.clone().text();
-      const contentType = c.res.headers.get("Content-Type") || "application/json";
-      
-      const entry = cache.set(cacheKey, body, { "Content-Type": contentType });
-      
-      c.header("ETag", entry.etag);
-      c.header("Cache-Control", `public, max-age=${ttlSeconds}`);
-      c.header("Vary", "Accept-Encoding, Origin");
-      c.header("X-Cache", "MISS");
+      try {
+        const body = await c.res.clone().text();
+        const contentType = c.res.headers.get("Content-Type") || "application/json";
+
+        const entry = cache.set(cacheKey, body, { "Content-Type": contentType });
+
+        c.header("ETag", entry.etag);
+        c.header("Cache-Control", `public, max-age=${ttlSeconds}`);
+        c.header("Vary", "Accept-Encoding, Origin");
+        c.header("X-Cache", "MISS");
+      } catch {
+        // Cache failure is non-critical — response was already sent
+      }
     }
   });
 }
