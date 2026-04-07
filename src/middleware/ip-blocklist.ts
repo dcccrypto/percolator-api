@@ -18,7 +18,14 @@ const logger = createLogger("api:ip-blocklist");
  * CIDR matching is supported for /8, /16, /24, /32 (IPv4 only).
  */
 
-const PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
+const PROXY_DEPTH = (() => {
+  const parsed = Number(process.env.TRUSTED_PROXY_DEPTH ?? 1);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    logger.warn("Invalid TRUSTED_PROXY_DEPTH, falling back to default", { value: process.env.TRUSTED_PROXY_DEPTH });
+    return 1;
+  }
+  return parsed;
+})();
 
 // Parse the env var once at startup
 const RAW_BLOCKLIST = (process.env.IP_BLOCKLIST ?? "")
