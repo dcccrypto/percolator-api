@@ -364,6 +364,13 @@ function removeClientFromSlab(client: WsClient, slabAddress: string): void {
     if (slabClients.size === 0) {
       connectionsPerSlab.delete(slabAddress);
       metrics.connectionsPerSlab.delete(slabAddress);
+      // Clean up orphaned price update state when last client leaves
+      const timer = priceUpdateTimers.get(slabAddress);
+      if (timer) {
+        clearTimeout(timer);
+        priceUpdateTimers.delete(slabAddress);
+      }
+      pendingPriceUpdates.delete(slabAddress);
     } else {
       metrics.connectionsPerSlab.set(slabAddress, slabClients.size);
     }
@@ -380,7 +387,11 @@ function flushPriceUpdate(slabAddress: string): void {
     
     pendingPriceUpdates.delete(slabAddress);
     priceUpdateTimers.delete(slabAddress);
-    
+
+    // Early exit if no subscribers remain (safety net — avoids unnecessary serialization)
+    const slabClients = connectionsPerSlab.get(slabAddress);
+    if (!slabClients || slabClients.size === 0) return;
+
     const channel = `price:${slabAddress}`;
     const msg = JSON.stringify({
       type: "price",
@@ -390,9 +401,6 @@ function flushPriceUpdate(slabAddress: string): void {
       indexPrice: pending.data.indexPriceE6 ? pending.data.indexPriceE6 / 1_000_000 : undefined,
       timestamp: pending.timestamp,
     });
-    
-    const slabClients = connectionsPerSlab.get(slabAddress);
-    if (!slabClients) return;
     
     for (const client of slabClients) {
       if (
