@@ -238,7 +238,14 @@ setInterval(() => {
  * Extract client IP respecting TRUSTED_PROXY_DEPTH.
  * See rate-limit.ts for full documentation.
  */
-const WS_PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
+const WS_PROXY_DEPTH = (() => {
+  const parsed = Number(process.env.TRUSTED_PROXY_DEPTH ?? 1);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    logger.warn("Invalid TRUSTED_PROXY_DEPTH, falling back to default", { value: process.env.TRUSTED_PROXY_DEPTH });
+    return 1;
+  }
+  return parsed;
+})();
 
 function normalizeIp(ip: string): string {
   if (ip.startsWith("::ffff:")) return ip.slice(7);
