@@ -43,7 +43,7 @@ export function oracleRouterRoutes(): Hono {
     }
 
     try {
-      const result = await resolvePrice(mint);
+      const result = await resolvePrice(mint, AbortSignal.timeout(10_000));
 
       // Cache the result (with max size enforcement)
       if (cache.size >= MAX_CACHE_SIZE) {
