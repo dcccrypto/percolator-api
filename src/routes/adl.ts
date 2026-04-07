@@ -69,10 +69,18 @@ export function __resetAdlCache(): void {
 /**
  * Insurance fund utilization BPS threshold above which ADL is considered active.
  * Mirrors ADL_INSURANCE_UTIL_THRESHOLD_BPS in percolator-keeper.
- * Default 8000 BPS = 80%.
+ * Default 8000 BPS = 80%. Valid range: 0–10000.
  */
-const INSURANCE_UTIL_THRESHOLD_BPS =
-  Number(process.env.ADL_INSURANCE_UTIL_THRESHOLD_BPS ?? "8000");
+const INSURANCE_UTIL_THRESHOLD_BPS = (() => {
+  const parsed = Number(process.env.ADL_INSURANCE_UTIL_THRESHOLD_BPS ?? "8000");
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0 || parsed > 10000) {
+    logger.warn("Invalid ADL_INSURANCE_UTIL_THRESHOLD_BPS, using default 8000", {
+      value: process.env.ADL_INSURANCE_UTIL_THRESHOLD_BPS,
+    });
+    return 8000;
+  }
+  return parsed;
+})();
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
