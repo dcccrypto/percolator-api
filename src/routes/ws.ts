@@ -68,11 +68,11 @@ if (WS_AUTH_REQUIRED && !WS_AUTH_SECRET) {
 }
 
 if (!WS_AUTH_SECRET) {
-  logger.warn("WS_AUTH_SECRET not set — using dev-only fallback. DO NOT use in production.");
+  logger.warn("WS_AUTH_SECRET not set — token validation will be inactive");
 }
 
-// Use a fallback secret only for development when auth is not required
-const WS_SECRET = WS_AUTH_SECRET || (IS_PRODUCTION ? "" : "percolator-ws-dev-secret-not-for-production");
+// Use WS_AUTH_SECRET when available; empty string when auth is not required
+const WS_SECRET = WS_AUTH_SECRET || "";
 
 // BH2: Heartbeat configuration
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
