@@ -292,13 +292,15 @@ async function verifyDatabaseConnection(): Promise<void> {
 // Verify database before starting server
 await verifyDatabaseConnection();
 
-const server = serve({ fetch: app.fetch, port }, async (info) => {
+const server = serve({ fetch: app.fetch, port }, (info) => {
   logger.info("Percolator API started", { port: info.port });
-  
-  // Send startup alert
-  await sendInfoAlert("API service started", [
+
+  // Send startup alert (fire-and-forget — should not block server readiness)
+  sendInfoAlert("API service started", [
     { name: "Port", value: info.port.toString(), inline: true },
-  ]);
+  ]).catch((err) => {
+    logger.warn("Failed to send startup alert", { error: err instanceof Error ? err.message : String(err) });
+  });
 });
 
 const wss = setupWebSocket(server as unknown as import("node:http").Server);
