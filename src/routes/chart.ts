@@ -128,8 +128,8 @@ async function fetchOhlcv(
           close: c ?? 0,
           volume: v ?? 0,
         }))
-        // Drop zero-close candles (usually padding)
-        .filter((candle) => candle.close > 0)
+        // Drop zero-close candles (usually padding) and invalid timestamps
+        .filter((candle) => candle.close > 0 && candle.timestamp > 0)
         .sort((a, b) => a.timestamp - b.timestamp)
     );
   } catch (err) {
@@ -191,7 +191,11 @@ export function chartRoutes(): Hono {
     // Step 1: resolve top pool
     const poolAddress = await getTopPool(mint);
     if (!poolAddress) {
-      return c.json({ candles: [], poolAddress: null, cached: false });
+      return c.json(
+        { candles: [], poolAddress: null, cached: false },
+        200,
+        { "Cache-Control": "public, max-age=60, stale-while-revalidate=120" }
+      );
     }
 
     // Step 2: fetch OHLCV
