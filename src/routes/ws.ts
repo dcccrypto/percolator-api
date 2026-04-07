@@ -880,11 +880,19 @@ export function setupWebSocket(server: Server): WebSocketServer {
               if (channel.startsWith("price:")) {
                 const slab = channel.split(":")[1];
                 try {
-                  const { data: stats } = await getSupabase()
+                  const { data: stats, error } = await getSupabase()
                     .from("market_stats")
                     .select("last_price, mark_price, index_price, updated_at")
                     .eq("slab_address", slab)
                     .single();
+
+                  if (error) {
+                    logger.warn("Database error fetching initial price for subscription", {
+                      slab,
+                      error: error.message,
+                    });
+                    continue;
+                  }
 
                   if (stats && stats.last_price) {
                     if (ws.bufferedAmount <= MAX_BUFFER_BYTES) {
