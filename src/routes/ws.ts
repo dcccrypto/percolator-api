@@ -1077,3 +1077,15 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
   return wss;
 }
+
+/**
+ * Clean up all pending price update timers.
+ * Call during graceful shutdown to prevent timers from firing after server closes.
+ */
+export function cleanupPriceUpdateTimers(): void {
+  for (const timer of priceUpdateTimers.values()) {
+    clearTimeout(timer);
+  }
+  priceUpdateTimers.clear();
+  pendingPriceUpdates.clear();
+}
