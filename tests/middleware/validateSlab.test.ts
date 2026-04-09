@@ -3,6 +3,9 @@ import { Hono } from "hono";
 
 vi.mock("@percolator/shared", () => ({
   sanitizeSlabAddress: vi.fn((addr: string) => addr),
+  createLogger: vi.fn(() => ({
+    info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
+  })),
   config: { supabaseUrl: "http://test", supabaseKey: "test", rpcUrl: "http://test" },
 }));
 
@@ -103,6 +106,29 @@ describe("validateSlab middleware", () => {
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data).toEqual({ error: "Invalid slab address" });
+  });
+
+  describe("BLOCKED_MARKET_ADDRESSES env validation", () => {
+    it("should drop invalid base58 entries and keep valid ones", async () => {
+      // Set env before re-importing the module
+      const validPubkey = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+      process.env.BLOCKED_MARKET_ADDRESSES = `${validPubkey},not-a-valid-key,truncated`;
+
+      vi.resetModules();
+
+      // Re-import after env change
+      const { isBlockedSlab } = await import("../../src/middleware/validateSlab.js");
+
+      // Valid pubkey should be blocked
+      expect(isBlockedSlab(validPubkey)).toBe(true);
+      // Invalid entries should have been dropped, not blocking anything
+      expect(isBlockedSlab("not-a-valid-key")).toBe(false);
+      expect(isBlockedSlab("truncated")).toBe(false);
+
+      // Clean up
+      delete process.env.BLOCKED_MARKET_ADDRESSES;
+      vi.resetModules();
+    });
   });
 
   describe("blocklist (GH#1357 / Sentry 2026-03-17)", () => {
