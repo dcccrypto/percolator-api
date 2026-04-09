@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { getConnection, getSupabase, createLogger, truncateErrorMessage } from "@percolator/shared";
-import { withRpcTimeout, HEALTH_RPC_TIMEOUT_MS } from "../utils/rpc-timeout.js";
+
+import { withRpcFallback } from "../utils/rpc-fallback.js";
+import { HEALTH_RPC_TIMEOUT_MS } from "../utils/rpc-timeout.js";
 import { getWebSocketMetrics } from "./ws.js";
 import { requireApiKey } from "../middleware/auth.js";
 
@@ -27,7 +29,12 @@ export function healthRoutes(): Hono {
     
     // Check RPC connectivity
     try {
-      await withRpcTimeout(getConnection().getSlot(), "healthcheck:getSlot", HEALTH_RPC_TIMEOUT_MS);
+      await withRpcFallback(
+        (conn) => conn.getSlot(),
+        getConnection(),
+        "healthcheck:getSlot",
+        HEALTH_RPC_TIMEOUT_MS,
+      );
       checks.rpc = true;
     } catch (err) {
       logger.error("RPC check failed", { error: truncateErrorMessage(err instanceof Error ? err.message : err, 120) });

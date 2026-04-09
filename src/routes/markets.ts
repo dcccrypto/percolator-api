@@ -5,7 +5,8 @@ import { cacheMiddleware } from "../middleware/cache.js";
 import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine } from "@percolatorct/sdk";
 import { getConnection, getSupabase, getNetwork, createLogger, sanitizeSlabAddress, truncateErrorMessage } from "@percolator/shared";
-import { withRpcTimeout, RpcTimeoutError } from "../utils/rpc-timeout.js";
+import { withRpcFallback } from "../utils/rpc-fallback.js";
+import { RpcTimeoutError } from "../utils/rpc-timeout.js";
 
 const logger = createLogger("api:markets");
 
@@ -124,10 +125,10 @@ export function marketRoutes(): Hono {
     const slab = c.req.param("slab");
     if (!slab) return c.json({ error: "slab required" }, 400);
     try {
-      const connection = getConnection();
       const slabPubkey = new PublicKey(slab);
-      const data = await withRpcTimeout(
-        fetchSlab(connection, slabPubkey),
+      const data = await withRpcFallback(
+        (conn) => fetchSlab(conn, slabPubkey),
+        getConnection(),
         `fetchSlab(${slab})`,
       );
       const header = parseHeader(data);
