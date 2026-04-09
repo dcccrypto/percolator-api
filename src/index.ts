@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { bodyLimit } from "hono/body-limit";
+import { requestId } from "hono/request-id";
 import { serve } from "@hono/node-server";
 import { createLogger, sendInfoAlert, getSupabase, sendCriticalAlert, truncateErrorMessage } from "@percolator/shared";
 import { initSentry, sentryMiddleware, flushSentry } from "./middleware/sentry.js";
@@ -105,6 +106,10 @@ app.use("*", bodyLimit({
   maxSize: 100 * 1024, // 100KB
   onError: (c) => c.json({ error: "Request body too large" }, 413),
 }));
+
+// Request ID — generates a UUID per request for log correlation and debugging.
+// Respects incoming X-Request-Id headers (e.g., from load balancers).
+app.use("*", requestId());
 
 // Default-deny for mutation methods. Until write endpoints are added,
 // reject any POST/PUT/DELETE/PATCH requests that reach the API.
@@ -211,13 +216,15 @@ app.get("/", (c) => c.json({
 
 // Global error handler
 app.onError((err, c) => {
+  const reqId = c.get("requestId");
   logger.error("Unhandled error", {
+    requestId: reqId,
     error: truncateErrorMessage(err.message, 120),
     stack: truncateErrorMessage(err.stack ?? "", 500),
     endpoint: c.req.path,
     method: c.req.method
   });
-  
+
   // Report to Sentry (sentryMiddleware may have already captured it,
   // but this ensures errors from middleware chain are also caught)
   try {
@@ -226,14 +233,16 @@ app.onError((err, c) => {
         endpoint: c.req.path,
         method: c.req.method,
         handler: "onError",
+        request_id: reqId,
       },
     });
   } catch (_sentryErr) {}
-  
+
   // Truncate error message for API response (details only in development)
   const showDetails = process.env.NODE_ENV !== "production";
   return c.json({
     error: "Internal server error",
+    requestId: reqId,
     ...(showDetails && { details: truncateErrorMessage(err.message, 200) })
   }, 500);
 });
