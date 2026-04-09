@@ -246,7 +246,7 @@ if (!process.env.NODE_ENV || !validNodeEnvs.includes(process.env.NODE_ENV)) {
     nodeEnv: process.env.NODE_ENV ?? "(unset)",
     validOptions: validNodeEnvs.join(", ")
   });
-  throw new Error(`NODE_ENV must be explicitly set. Got: ${process.env.NODE_ENV ?? "(unset)"}. Must be one of: ${validNodeEnvs.join(", ")}`);
+  process.exit(1);
 }
 
 const port = Number(process.env.API_PORT ?? 3001);
