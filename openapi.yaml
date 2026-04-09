@@ -885,7 +885,7 @@ components:
         dailyRatePercent:
           type: number
           description: Daily funding rate as percentage
-        netLpPosition:
+        netLpPos:
           type: string
           description: Net LP position (inventory imbalance)
 
@@ -902,7 +902,7 @@ components:
           type: number
         annualizedPercent:
           type: number
-        netLpPosition:
+        netLpPos:
           type: string
         last24hHistory:
           type: array
