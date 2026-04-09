@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { statsRoutes } from "../../src/routes/stats.js";
+import { clearDbCache } from "../../src/middleware/db-cache-fallback.js";
 
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
@@ -48,6 +49,7 @@ describe("stats routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearDbCache();
 
     // Create a chainable mock that supports the full Supabase query builder pattern.
     // All filter/modifier methods return `mockSupabase` to allow arbitrary chaining.
@@ -324,7 +326,7 @@ describe("stats routes", () => {
       expect(typeof data.trades24h).toBe("number");
     });
 
-    it("should handle database errors", async () => {
+    it("should handle database errors with 503 (no stale cache)", async () => {
       mockSupabase.from.mockImplementation((_table: string) => {
         return chainable({ count: null, data: null, error: new Error("Database error") });
       });
@@ -332,9 +334,10 @@ describe("stats routes", () => {
       const app = statsRoutes();
       const res = await app.request("/stats");
 
-      expect(res.status).toBe(500);
+      // withDbCacheFallback returns 503 when DB fails and no stale cache is available
+      expect(res.status).toBe(503);
       const data = await res.json();
-      expect(data.error).toBe("Failed to fetch platform statistics");
+      expect(data.error).toBe("Database temporarily unavailable");
     });
   });
 });

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getSupabase, getNetwork, createLogger, truncateErrorMessage } from "@percolator/shared";
 import { validateSlab, isBlockedSlab } from "../middleware/validateSlab.js";
+import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
 
 const logger = createLogger("api:prices");
 
@@ -18,29 +19,33 @@ export function priceRoutes(): Hono {
     typeof v === "number" && Number.isFinite(v) && v > 0 && v <= MAX_SANE_PRICE_USD ? v : null;
 
   app.get("/prices/markets", async (c) => {
-    try {
-      const { data, error } = await getSupabase()
-        .from("markets_with_stats")
-        .select("slab_address, last_price, mark_price, index_price, updated_at")
-        .eq("network", getNetwork())
-        .not("slab_address", "is", null);
-      if (error) throw error;
-      const markets = (data ?? [])
-        .filter((m) => !isBlockedSlab(m.slab_address))
-        .map((m) => ({
-          slab_address: m.slab_address,
-          last_price: sanitizeUsdPrice(m.last_price),
-          mark_price: sanitizeUsdPrice(m.mark_price),
-          index_price: sanitizeUsdPrice(m.index_price),
-          updated_at: m.updated_at,
-        }));
-      return c.json({ markets });
-    } catch (err) {
-      logger.error("Error fetching market prices", {
-        error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120),
-      });
-      return c.json({ error: "Failed to fetch prices" }, 500);
+    const result = await withDbCacheFallback(
+      "prices:markets",
+      async () => {
+        const { data, error } = await getSupabase()
+          .from("markets_with_stats")
+          .select("slab_address, last_price, mark_price, index_price, updated_at")
+          .eq("network", getNetwork())
+          .not("slab_address", "is", null);
+        if (error) throw error;
+        return (data ?? [])
+          .filter((m) => !isBlockedSlab(m.slab_address))
+          .map((m) => ({
+            slab_address: m.slab_address,
+            last_price: sanitizeUsdPrice(m.last_price),
+            mark_price: sanitizeUsdPrice(m.mark_price),
+            index_price: sanitizeUsdPrice(m.index_price),
+            updated_at: m.updated_at,
+          }));
+      },
+      c
+    );
+
+    if (result instanceof Response) {
+      return result;
     }
+
+    return c.json({ markets: result });
   });
 
   app.get("/prices/:slab", validateSlab, async (c) => {
