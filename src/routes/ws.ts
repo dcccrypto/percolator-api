@@ -85,6 +85,13 @@ const CLIENT_MSG_LIMIT = 60; // max 60 messages per minute per client
 // Price update batching configuration
 const PRICE_BATCH_INTERVAL_MS = 500; // Batch price updates every 500ms per slab
 
+// Per-query timeout for the best-effort initial-price fetch in the WS
+// subscribe handler. The handler runs concurrently per message and per
+// channel (up to 50 channels per subscribe), so without a bound a slow
+// Supabase response would let queries pile up per client and exhaust the
+// connection pool. 3s is generous compared to typical sub-100ms reads.
+const WS_INITIAL_PRICE_QUERY_TIMEOUT_MS = 3000;
+
 interface WsClient {
   ws: WebSocket;
   subscriptions: Set<string>; // Channel subscriptions: "price:SOL", "trades:BTC", etc.
@@ -911,10 +918,19 @@ export function setupWebSocket(server: Server): WebSocketServer {
               if (channel.startsWith("price:")) {
                 const slab = channel.split(":")[1];
                 try {
+                  // Bound the upstream call: this is best-effort UX data, and
+                  // the message handler is async so each subscribed channel
+                  // spawns its own in-flight query. Without a per-query
+                  // timeout a slow Supabase response would let queries pile
+                  // up per client, exhausting the connection pool and
+                  // stalling handler closures indefinitely. AbortSignal is
+                  // the same idiom oracle-router.ts uses, and it actually
+                  // cancels the underlying fetch — not just the await.
                   const { data: stats, error } = await getSupabase()
                     .from("market_stats")
                     .select("last_price, mark_price, index_price, updated_at")
                     .eq("slab_address", slab)
+                    .abortSignal(AbortSignal.timeout(WS_INITIAL_PRICE_QUERY_TIMEOUT_MS))
                     .single();
 
                   if (error) {
