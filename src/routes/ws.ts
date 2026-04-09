@@ -212,6 +212,40 @@ const metrics: Metrics = {
   lastResetTime: Date.now(),
 };
 
+/**
+ * Safely send a JSON-serializable payload to a WebSocket client.
+ *
+ * The async message handler runs concurrently per message and contains
+ * `await`s, so the underlying socket can transition out of OPEN between
+ * any two statements. The `ws` library throws synchronously if `send()`
+ * is called when `readyState !== OPEN`, which would otherwise crash the
+ * handler closure halfway through processing a message. This helper
+ * centralises three things every send must do:
+ *
+ *   1. Check `readyState === OPEN` to avoid the throw on a closed socket.
+ *   2. Honour `bufferedAmount <= MAX_BUFFER_BYTES` for backpressure.
+ *   3. Catch any residual TOCTOU race where the socket closes between
+ *      the check and the send call itself, logging it as debug rather
+ *      than letting the error escape the handler.
+ *
+ * On a successful send, metrics are bumped so observability stays
+ * accurate without callers having to remember to do it themselves.
+ */
+function safeSend(ws: WebSocket, payload: unknown): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  if (ws.bufferedAmount > MAX_BUFFER_BYTES) return;
+  const serialized = JSON.stringify(payload);
+  try {
+    ws.send(serialized);
+    metrics.messagesSent++;
+    metrics.bytesSent += serialized.length;
+  } catch (err) {
+    logger.debug("safeSend dropped after socket transitioned out of OPEN", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 // Reset rate metrics every minute for messages/sec and bytes/sec
 setInterval(() => {
   const now = Date.now();
@@ -703,7 +737,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
       }, PONG_TIMEOUT_MS);
     }, HEARTBEAT_INTERVAL_MS);
 
-    ws.send(JSON.stringify({ type: "connected", message: "Percolator WebSocket connected" }));
+    safeSend(ws, { type: "connected", message: "Percolator WebSocket connected" });
 
     ws.on("error", (err) => {
       logger.warn("WebSocket connection error", {
@@ -722,7 +756,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
         
         // Limit message size
         if (rawStr.length > 1024) {
-          ws.send(JSON.stringify({ type: "error", message: "Message too large" }));
+          safeSend(ws, { type: "error", message: "Message too large" });
           return;
         }
 
@@ -734,7 +768,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
         }
         client.msgCount++;
         if (client.msgCount > CLIENT_MSG_LIMIT) {
-          ws.send(JSON.stringify({ type: "error", message: "Message rate limit exceeded" }));
+          safeSend(ws, { type: "error", message: "Message rate limit exceeded" });
           if (client.msgCount === CLIENT_MSG_LIMIT + 1) {
             logger.warn("Client message rate limit exceeded", { ip: client.ip });
           }
@@ -761,7 +795,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
                 currentSlab: client.authenticatedSlab,
                 requestedSlab: newSlab,
               });
-              ws.send(JSON.stringify({ type: "error", message: "Already authenticated — disconnect to change slab binding" }));
+              safeSend(ws, { type: "error", message: "Already authenticated — disconnect to change slab binding" });
               return;
             }
           }
@@ -784,7 +818,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
                   ip: client.ip,
                   count: ipCount,
                 });
-                ws.send(JSON.stringify({ type: "error", message: "Authenticated connection limit reached" }));
+                safeSend(ws, { type: "error", message: "Authenticated connection limit reached" });
                 ws.close(1008, "Connection limit reached");
                 return;
               }
@@ -802,22 +836,22 @@ export function setupWebSocket(server: Server): WebSocketServer {
               ip: client.ip, 
               slab: client.authenticatedSlab 
             });
-            ws.send(JSON.stringify({ 
-              type: "authenticated", 
-              slabBinding: client.authenticatedSlab 
-            }));
+            safeSend(ws, {
+              type: "authenticated",
+              slabBinding: client.authenticatedSlab,
+            });
           } else {
             logger.warn("Invalid auth token in message", { ip: client.ip });
             // Record auth failure for rate limiting (issue #839)
             recordAuthFailure(client.ip);
-            ws.send(JSON.stringify({ type: "error", message: "Invalid authentication token" }));
+            safeSend(ws, { type: "error", message: "Invalid authentication token" });
           }
           return;
         }
         
         // If auth required and not authenticated, reject all other messages
         if (WS_AUTH_REQUIRED && !client.authenticated) {
-          ws.send(JSON.stringify({ type: "error", message: "Authentication required" }));
+          safeSend(ws, { type: "error", message: "Authentication required" });
           return;
         }
         
@@ -825,7 +859,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
         if (msg.type === "subscribe" && msg.channels && Array.isArray(msg.channels)) {
           const MAX_CHANNELS_PER_MESSAGE = 50;
           if (msg.channels.length > MAX_CHANNELS_PER_MESSAGE) {
-            ws.send(JSON.stringify({ type: "error", message: `Max ${MAX_CHANNELS_PER_MESSAGE} channels per subscribe message` }));
+            safeSend(ws, { type: "error", message: `Max ${MAX_CHANNELS_PER_MESSAGE} channels per subscribe message` });
             return;
           }
 
@@ -904,7 +938,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
           }
           
           if (subscribed.length > 0) {
-            ws.send(JSON.stringify({ type: "subscribed", channels: subscribed }));
+            safeSend(ws, { type: "subscribed", channels: subscribed });
             
             // Send initial data for price channels
             for (const channel of subscribed) {
@@ -926,18 +960,14 @@ export function setupWebSocket(server: Server): WebSocketServer {
                   }
 
                   if (stats && stats.last_price) {
-                    if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_BUFFER_BYTES) {
-                      ws.send(
-                        JSON.stringify({
-                          type: "price",
-                          slab,
-                          price: stats.last_price / 1_000_000,
-                          markPrice: stats.mark_price ? stats.mark_price / 1_000_000 : undefined,
-                          indexPrice: stats.index_price ? stats.index_price / 1_000_000 : undefined,
-                          timestamp: stats.updated_at,
-                        }),
-                      );
-                    }
+                    safeSend(ws, {
+                      type: "price",
+                      slab,
+                      price: stats.last_price / 1_000_000,
+                      markPrice: stats.mark_price ? stats.mark_price / 1_000_000 : undefined,
+                      indexPrice: stats.index_price ? stats.index_price / 1_000_000 : undefined,
+                      timestamp: stats.updated_at,
+                    });
                   }
                 } catch (err) {
                   logger.warn("Failed to fetch initial price for subscription", {
@@ -950,20 +980,20 @@ export function setupWebSocket(server: Server): WebSocketServer {
           }
           
           if (errors.length > 0) {
-            ws.send(JSON.stringify({ type: "error", message: errors.join("; ") }));
+            safeSend(ws, { type: "error", message: errors.join("; ") });
           }
         }
         // Legacy: single slab subscription (backward compatibility)
         else if (msg.type === "subscribe" && msg.slabAddress) {
           const sanitized = sanitizeSlabAddress(msg.slabAddress);
           if (!sanitized) {
-            ws.send(JSON.stringify({ type: "error", message: "Invalid slab address" }));
+            safeSend(ws, { type: "error", message: "Invalid slab address" });
             return;
           }
 
           // Reject blocked/phantom slabs
           if (isBlockedSlab(sanitized)) {
-            ws.send(JSON.stringify({ type: "error", message: "Market not found" }));
+            safeSend(ws, { type: "error", message: "Market not found" });
             return;
           }
           
@@ -974,26 +1004,26 @@ export function setupWebSocket(server: Server): WebSocketServer {
               authenticatedSlab: client.authenticatedSlab, 
               requestedSlab: sanitized 
             });
-            ws.send(JSON.stringify({
+            safeSend(ws, {
               type: "error",
-              message: "Cannot subscribe — token is bound to a different market"
-            }));
+              message: "Cannot subscribe — token is bound to a different market",
+            });
             return;
           }
           
           // Check per-slab connection limit before subscribing
           const slabClients = connectionsPerSlab.get(sanitized);
           if (slabClients && slabClients.size >= MAX_CONNECTIONS_PER_SLAB) {
-            ws.send(JSON.stringify({ type: "error", message: "Connection limit for this market reached" }));
+            safeSend(ws, { type: "error", message: "Connection limit for this market reached" });
             return;
           }
 
           // Subscribe to all channels for this slab (backward compatibility)
           const channels = [`price:${sanitized}`, `trades:${sanitized}`, `funding:${sanitized}`];
-          ws.send(JSON.stringify({ 
-            type: "info", 
-            message: "Please use channels array. Subscribing to all channels for this slab." 
-          }));
+          safeSend(ws, {
+            type: "info",
+            message: "Please use channels array. Subscribing to all channels for this slab.",
+          });
           
           for (const channel of channels) {
             if (client.subscriptions.has(channel)) continue;
@@ -1005,12 +1035,12 @@ export function setupWebSocket(server: Server): WebSocketServer {
           }
           
           addClientToSlab(client, sanitized);
-          ws.send(JSON.stringify({ type: "subscribed", slabAddress: sanitized, channels }));
+          safeSend(ws, { type: "subscribed", slabAddress: sanitized, channels });
         }
         // Handle unsubscribe with channels array
         else if (msg.type === "unsubscribe" && msg.channels && Array.isArray(msg.channels)) {
           if (msg.channels.length > MAX_SUBSCRIPTIONS_PER_CLIENT) {
-            ws.send(JSON.stringify({ type: "error", message: "Too many channels in unsubscribe message" }));
+            safeSend(ws, { type: "error", message: "Too many channels in unsubscribe message" });
             return;
           }
 
@@ -1035,7 +1065,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
           }
           
           if (unsubscribed.length > 0) {
-            ws.send(JSON.stringify({ type: "unsubscribed", channels: unsubscribed }));
+            safeSend(ws, { type: "unsubscribed", channels: unsubscribed });
           }
         }
         // Legacy: single slab unsubscribe
@@ -1053,14 +1083,12 @@ export function setupWebSocket(server: Server): WebSocketServer {
             }
             
             removeClientFromSlab(client, sanitized);
-            ws.send(JSON.stringify({ type: "unsubscribed", slabAddress: sanitized, channels: unsubscribed }));
+            safeSend(ws, { type: "unsubscribed", slabAddress: sanitized, channels: unsubscribed });
           }
         }
       } catch (err) {
         logger.warn("Error processing WS message", { ip: client.ip, error: err });
-        if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_BUFFER_BYTES) {
-          ws.send(JSON.stringify({ type: "error", message: "Invalid message" }));
-        }
+        safeSend(ws, { type: "error", message: "Invalid message" });
       }
     });
 
