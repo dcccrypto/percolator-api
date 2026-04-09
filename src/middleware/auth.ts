@@ -1,5 +1,8 @@
 import type { Context, Next } from "hono";
 import { timingSafeEqual, createHash } from "node:crypto";
+import { createLogger } from "@percolator/shared";
+
+const logger = createLogger("api:auth");
 
 /**
  * C2: API key auth middleware for mutation endpoints.
@@ -17,17 +20,22 @@ export function requireApiKey() {
       }
       return next();
     }
-    
+
     const provided = c.req.header("x-api-key");
     if (!provided) {
+      logger.warn("Auth failure: missing x-api-key", {
+        path: c.req.path,
+        method: c.req.method,
+        ip: c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown",
+      });
       return c.json({ error: "Unauthorized: invalid or missing x-api-key" }, 401);
     }
-    
+
     // Use timing-safe comparison to prevent timing attacks
     // Hash both values to ensure equal length for timingSafeEqual
     const providedHash = createHash("sha256").update(provided).digest();
     const expectedHash = createHash("sha256").update(apiAuthKey).digest();
-    
+
     let isValid = false;
     try {
       isValid = timingSafeEqual(providedHash, expectedHash);
@@ -35,11 +43,16 @@ export function requireApiKey() {
       // timingSafeEqual throws if buffers are different lengths (shouldn't happen with hashes)
       isValid = false;
     }
-    
+
     if (!isValid) {
+      logger.warn("Auth failure: invalid x-api-key", {
+        path: c.req.path,
+        method: c.req.method,
+        ip: c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown",
+      });
       return c.json({ error: "Unauthorized: invalid or missing x-api-key" }, 401);
     }
-    
+
     return next();
   };
 }
