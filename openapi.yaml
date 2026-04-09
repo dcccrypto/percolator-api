@@ -468,11 +468,11 @@ paths:
         - $ref: '#/components/parameters/SlabAddress'
         - name: limit
           in: query
-          description: Maximum number of records to return (max 1000)
+          description: Maximum number of records to return (max 500)
           schema:
             type: integer
             default: 100
-            maximum: 1000
+            maximum: 500
         - name: since
           in: query
           description: ISO timestamp to fetch records from
