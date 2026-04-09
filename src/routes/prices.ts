@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { getSupabase, getNetwork, createLogger, truncateErrorMessage } from "@percolator/shared";
-import { validateSlab } from "../middleware/validateSlab.js";
+import { validateSlab, isBlockedSlab } from "../middleware/validateSlab.js";
 
 const logger = createLogger("api:prices");
 
@@ -15,7 +15,8 @@ export function priceRoutes(): Hono {
         .eq("network", getNetwork())
         .not("slab_address", "is", null);
       if (error) throw error;
-      return c.json({ markets: data ?? [] });
+      const filtered = (data ?? []).filter((m) => !isBlockedSlab(m.slab_address));
+      return c.json({ markets: filtered });
     } catch (err) {
       logger.error("Error fetching market prices", {
         error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120),
