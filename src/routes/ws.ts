@@ -926,17 +926,24 @@ export function setupWebSocket(server: Server): WebSocketServer {
             message: "Please use channels array. Subscribing to all channels for this slab." 
           }));
           
+          const subscribed: string[] = [];
           for (const channel of channels) {
             if (client.subscriptions.has(channel)) continue;
             if (globalSubscriptionCount >= MAX_GLOBAL_SUBSCRIPTIONS) break;
             if (client.subscriptions.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) break;
-            
+
             client.subscriptions.add(channel);
             globalSubscriptionCount++;
+            subscribed.push(channel);
           }
-          
-          addClientToSlab(client, sanitized);
-          ws.send(JSON.stringify({ type: "subscribed", slabAddress: sanitized, channels }));
+
+          if (subscribed.length > 0) {
+            addClientToSlab(client, sanitized);
+          }
+          ws.send(JSON.stringify({ type: "subscribed", slabAddress: sanitized, channels: subscribed }));
+          if (subscribed.length < channels.length) {
+            ws.send(JSON.stringify({ type: "error", message: "Subscription limit reached — some channels were not subscribed" }));
+          }
         }
         // Handle unsubscribe with channels array
         else if (msg.type === "unsubscribe" && msg.channels && Array.isArray(msg.channels)) {
