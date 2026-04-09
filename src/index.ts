@@ -25,7 +25,7 @@ import { chartRoutes } from "./routes/chart.js";
 import { candleRoutes } from "./routes/candles.js";
 import { docsRoutes } from "./routes/docs.js";
 import { adlRoutes } from "./routes/adl.js";
-import { setupWebSocket, cleanupPriceUpdateTimers } from "./routes/ws.js";
+import { setupWebSocket, cleanupPriceUpdateTimers, cleanupEventBusListeners } from "./routes/ws.js";
 import { OraclePriceBroadcaster } from "./services/OraclePriceBroadcaster.js";
 import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
 import { ipBlocklist } from "./middleware/ip-blocklist.js";
@@ -387,8 +387,11 @@ async function shutdown(signal: string): Promise<void> {
       { name: "Signal", value: signal, inline: true },
     ]);
 
-    // Clean up pending price update timers before closing connections
+    // Clean up pending price update timers and unsubscribe shared eventBus
+    // listeners before closing connections, so they don't keep stale state
+    // alive past the process lifetime.
     cleanupPriceUpdateTimers();
+    cleanupEventBusListeners();
 
     // Terminate all active WebSocket connections so they don't hold the server open
     for (const client of wss.clients) {
