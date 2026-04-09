@@ -53,6 +53,27 @@ if (!process.env.SUPABASE_SERVICE_KEY) {
   process.exit(1);
 }
 
+// In production, API_AUTH_KEY must be configured. Treat empty / whitespace-only
+// as not configured: the runtime check in src/middleware/auth.ts uses `!apiAuthKey`
+// which would falsely accept "   " as a key. Catching this at startup turns a
+// silent fail-late misconfig (HTTP 500 on first protected request) into a hard
+// boot failure that deploy pipelines and health checks will surface immediately.
+if (process.env.NODE_ENV === "production" && !process.env.API_AUTH_KEY?.trim()) {
+  logger.error(
+    "API_AUTH_KEY environment variable is required in production and cannot be empty or whitespace",
+  );
+  process.exit(1);
+}
+
+// In non-production, log a clear warning if auth is disabled. This catches the
+// common "I forgot to set NODE_ENV=production" mistake before the misconfigured
+// service is exposed to real traffic.
+if (process.env.NODE_ENV !== "production" && !process.env.API_AUTH_KEY?.trim()) {
+  logger.warn(
+    "API_AUTH_KEY is not set — API authentication is disabled (non-production mode)",
+  );
+}
+
 logger.info("CORS allowed origins", { origins: allowedOrigins });
 const wildcardOrigins = allowedOrigins.filter(o => o.startsWith("https://*."));
 if (wildcardOrigins.length > 0) {
