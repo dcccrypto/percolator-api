@@ -191,6 +191,15 @@ interface PendingPriceUpdate {
 const pendingPriceUpdates = new Map<string, PendingPriceUpdate>();
 const priceUpdateTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// References to the eventBus listeners registered inside setupWebSocket().
+// We hold them at module scope so they can be removed via cleanupEventBus
+// Listeners() — both at the start of setupWebSocket() (idempotent re-entry,
+// important for tests that re-import this module) and on graceful shutdown.
+// Without this, repeated calls leak listeners on the shared eventBus singleton.
+let priceUpdatedListener: ((payload: any) => void) | null = null;
+let tradeExecutedListener: ((payload: any) => void) | null = null;
+let fundingUpdatedListener: ((payload: any) => void) | null = null;
+
 // Metrics tracking
 interface Metrics {
   totalConnections: number;
@@ -449,6 +458,11 @@ export function getWebSocketMetrics(): any {
 export function setupWebSocket(server: Server): WebSocketServer {
   const wss = new WebSocketServer({ server, maxPayload: 1024 });
 
+  // Idempotent re-entry: drop any listeners left over from a previous call
+  // (tests, hot reload, restart) before re-registering. The eventBus is a
+  // shared singleton, so without this listeners would accumulate.
+  cleanupEventBusListeners();
+
   wss.on("error", (err) => {
     logger.error("WebSocketServer error", {
       error: err instanceof Error ? err.message : String(err),
@@ -458,7 +472,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
   const clients = new Set<WsClient>();
 
   // Broadcast price updates to subscribed clients (with batching)
-  eventBus.on("price.updated", (payload: any) => {
+  priceUpdatedListener = (payload: any) => {
     try {
       const slabAddress = payload.slabAddress;
 
@@ -486,10 +500,11 @@ export function setupWebSocket(server: Server): WebSocketServer {
     } catch (err) {
       logger.error("Error in price.updated handler", { error: err instanceof Error ? err.message : String(err) });
     }
-  });
+  };
+  eventBus.on("price.updated", priceUpdatedListener);
 
   // Broadcast trade events to subscribed clients
-  eventBus.on("trade.executed", (payload: any) => {
+  tradeExecutedListener = (payload: any) => {
     try {
       const slabAddress = payload.slabAddress;
       const channel = `trades:${slabAddress}`;
@@ -520,10 +535,11 @@ export function setupWebSocket(server: Server): WebSocketServer {
     } catch (err) {
       logger.error("Error in trade.executed handler", { error: err instanceof Error ? err.message : String(err) });
     }
-  });
+  };
+  eventBus.on("trade.executed", tradeExecutedListener);
 
   // Broadcast funding rate updates to subscribed clients
-  eventBus.on("funding.updated", (payload: any) => {
+  fundingUpdatedListener = (payload: any) => {
     try {
       const slabAddress = payload.slabAddress;
       const channel = `funding:${slabAddress}`;
@@ -552,7 +568,8 @@ export function setupWebSocket(server: Server): WebSocketServer {
     } catch (err) {
       logger.error("Error in funding.updated handler", { error: err instanceof Error ? err.message : String(err) });
     }
-  });
+  };
+  eventBus.on("funding.updated", fundingUpdatedListener);
 
   wss.on("connection", (ws, req: IncomingMessage) => {
     const clientIp = getClientIp(req);
@@ -1129,4 +1146,28 @@ export function cleanupPriceUpdateTimers(): void {
   }
   priceUpdateTimers.clear();
   pendingPriceUpdates.clear();
+}
+
+/**
+ * Remove the eventBus listeners registered by setupWebSocket().
+ *
+ * The eventBus is a shared singleton (re-imported from @percolator/shared),
+ * so listeners registered inside setupWebSocket() persist across module
+ * reloads. Without this helper they would accumulate on every test that
+ * resets modules and on every graceful shutdown / restart cycle, causing
+ * duplicate broadcasts and a slow memory leak. Safe to call multiple times.
+ */
+export function cleanupEventBusListeners(): void {
+  if (priceUpdatedListener) {
+    eventBus.off("price.updated", priceUpdatedListener);
+    priceUpdatedListener = null;
+  }
+  if (tradeExecutedListener) {
+    eventBus.off("trade.executed", tradeExecutedListener);
+    tradeExecutedListener = null;
+  }
+  if (fundingUpdatedListener) {
+    eventBus.off("funding.updated", fundingUpdatedListener);
+    fundingUpdatedListener = null;
+  }
 }
