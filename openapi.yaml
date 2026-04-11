@@ -66,8 +66,10 @@ paths:
       tags:
         - WebSocket
       summary: WebSocket connection metrics
-      description: Returns current WebSocket connection counts, throughput, and rate limits
+      description: Returns current WebSocket connection counts, throughput, and rate limits. Requires API key authentication.
       operationId: getWsStats
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
           description: WebSocket metrics
@@ -86,6 +88,14 @@ paths:
                   maxGlobalConnections: 500
                   maxConnectionsPerSlab: 50
                   maxConnectionsPerIp: 5
+        '401':
+          description: Unauthorized — missing or invalid x-api-key header
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Unauthorized: invalid or missing x-api-key"
         '500':
           $ref: '#/components/responses/InternalServerError'
   /health:
@@ -623,6 +633,13 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: API key passed via the x-api-key request header
+
   parameters:
     SlabAddress:
       name: slab
