@@ -685,6 +685,9 @@ components:
             rpc:
               type: boolean
               description: Solana RPC connectivity status
+            ws:
+              type: boolean
+              description: WebSocket subsystem status (false when >95% of connection slots used)
         uptime:
           type: integer
           description: Service uptime in seconds
