@@ -1,6 +1,8 @@
 import { PublicKey } from "@solana/web3.js";
 import type { Context, Next } from "hono";
-import { sanitizeSlabAddress } from "@percolator/shared";
+import { sanitizeSlabAddress, createLogger } from "@percolator/shared";
+
+const logger = createLogger("api:validateSlab");
 
 /**
  * Known-bad slab addresses that cause backend 500 errors (empty vault / phantom OI).
@@ -45,7 +47,16 @@ const ENV_BLOCKED_SLABS: ReadonlySet<string> = new Set(
   (process.env.BLOCKED_MARKET_ADDRESSES ?? "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean),
+    .filter(Boolean)
+    .filter((entry) => {
+      try {
+        new PublicKey(entry);
+        return true;
+      } catch {
+        logger.warn("Invalid BLOCKED_MARKET_ADDRESSES entry dropped (not a valid base58 pubkey)", { entry });
+        return false;
+      }
+    }),
 );
 
 /**
