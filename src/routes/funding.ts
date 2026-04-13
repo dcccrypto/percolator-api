@@ -177,8 +177,8 @@ export function fundingRoutes(): Hono {
       }));
 
       // GH#1511: Sanitize last_price from markets_with_stats — same ceiling used
-      // in /api/markets to guard against unscaled admin-set test prices.
-      const MAX_SANE_PRICE_USD = 1_000_000;
+      // in /markets to guard against unscaled admin-set test prices.
+      const MAX_SANE_PRICE_USD = 1_000_000_000;
       const rawLastPrice = Number(stats.last_price ?? 0);
       const sanitizedLastPrice =
         rawLastPrice > 0 && rawLastPrice <= MAX_SANE_PRICE_USD ? rawLastPrice : null;
