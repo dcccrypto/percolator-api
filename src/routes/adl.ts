@@ -50,6 +50,8 @@ import {
   createLogger,
   sanitizeSlabAddress,
 } from "@percolator/shared";
+import { withRpcFallback } from "../utils/rpc-fallback.js";
+import { RpcTimeoutError } from "../utils/rpc-timeout.js";
 import { isBlockedSlab } from "../middleware/validateSlab.js";
 
 const logger = createLogger("api:adl");
@@ -178,11 +180,18 @@ export function adlRoutes(): Hono {
       return c.json({ error: "Market not found" }, 404);
     }
 
-    const connection = getConnection();
     let data: Uint8Array;
     try {
-      data = await fetchSlab(connection, new PublicKey(slab));
+      data = await withRpcFallback(
+        (conn) => fetchSlab(conn, new PublicKey(slab)),
+        getConnection(),
+        `fetchSlab(${slab})`,
+      );
     } catch (err) {
+      if (err instanceof RpcTimeoutError) {
+        logger.warn("RPC timeout fetching slab for ADL", { slab, timeoutMs: err.timeoutMs });
+        return c.json({ error: "Upstream RPC timeout", slab }, 504);
+      }
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("not found")) {
         return c.json({ error: "Slab account not found", slab }, 404);
