@@ -165,6 +165,11 @@ export function adlRoutes(): Hono {
     // Check cache to avoid redundant expensive RPC calls
     const cached = adlCache.get(slab);
     if (cached && Date.now() - cached.fetchedAt < ADL_CACHE_TTL_MS) {
+      // Promote to most-recently-used so the FIFO-by-insertion eviction
+      // at lines below behaves as LRU. Without this, hot keys inserted
+      // early get evicted while cold keys inserted later survive.
+      adlCache.delete(slab);
+      adlCache.set(slab, cached);
       return c.json(cached.data, 200, { "X-Cache": "HIT" });
     }
 
