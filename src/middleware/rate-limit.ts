@@ -15,13 +15,19 @@ const WINDOW_MS = 60_000; // 1 minute
 const READ_LIMIT = 100; // 100 requests per minute for reads
 const WRITE_LIMIT = 10; // 10 requests per minute for writes
 const MAX_RATE_LIMIT_ENTRIES = 50_000; // cap to prevent OOM from distributed DDoS
+// Number of leading entries the eviction path scans for an already-expired
+// bucket before falling back to deleting the oldest insertion. Bounded so the
+// per-request cost stays O(1) even when the map is full.
+const EVICTION_SCAN_LIMIT = 32;
 
-// Clean up expired buckets every 5 minutes
+// Clean up expired buckets every minute. Aligned with WINDOW_MS so most
+// expired entries are reclaimed within one window, keeping the eviction
+// scan effective even under sustained pressure from many fresh IPs.
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of readBuckets) if (v.resetAt <= now) readBuckets.delete(k);
   for (const [k, v] of writeBuckets) if (v.resetAt <= now) writeBuckets.delete(k);
-}, 5 * 60_000).unref();
+}, 60_000).unref();
 
 /**
  * Extract client IP with configurable trusted proxy depth.
@@ -94,8 +100,28 @@ function checkLimit(
   
   if (!bucket || bucket.resetAt <= now) {
     if (!bucket && buckets.size >= MAX_RATE_LIMIT_ENTRIES) {
-      const oldestKey = buckets.keys().next().value;
-      if (oldestKey !== undefined) buckets.delete(oldestKey);
+      // Prefer evicting an already-expired bucket so legitimate users with
+      // an active rate-limit window are not displaced by attackers cycling
+      // through fresh IPs. Bound the scan so the per-request cost stays
+      // O(1) even when the whole map is active.
+      let evicted = false;
+      let scanned = 0;
+      for (const [k, v] of buckets) {
+        if (scanned >= EVICTION_SCAN_LIMIT) break;
+        scanned++;
+        if (v.resetAt <= now) {
+          buckets.delete(k);
+          evicted = true;
+          break;
+        }
+      }
+      // Fallback: if nothing in the scan window has expired, drop the
+      // oldest insertion as a last resort. This still happens but only
+      // when the entire scan window is occupied by genuinely-active IPs.
+      if (!evicted) {
+        const oldestKey = buckets.keys().next().value;
+        if (oldestKey !== undefined) buckets.delete(oldestKey);
+      }
     }
     bucket = { count: 0, resetAt: now + WINDOW_MS };
     buckets.set(ip, bucket);
