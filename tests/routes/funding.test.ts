@@ -91,7 +91,7 @@ describe("funding routes", () => {
       const data = await res.json();
       expect(data.slabAddress).toBe("11111111111111111111111111111111");
       expect(data.currentRateBpsPerSlot).toBe(10);
-      expect(data.netLpPosition).toBe("1000000");
+      expect(data.netLpPos).toBe("1000000");
       expect(data.last24hHistory).toHaveLength(1);
     });
 
