@@ -56,6 +56,10 @@ tags:
     description: Oracle price resolution
   - name: Stats
     description: Platform-wide statistics
+  - name: ADL
+    description: Auto-deleveraging rankings and trigger state
+  - name: Chart
+    description: OHLCV candlestick chart data
   - name: WebSocket
     description: WebSocket metrics and real-time data streaming
 
@@ -499,6 +503,157 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
+
+  /funding/{slab}/historySince:
+    get:
+      tags:
+        - Funding
+      summary: Get funding history since a timestamp
+      description: |
+        Returns funding rate history starting from a required `since` timestamp.
+        Similar to /funding/{slab}/history but with a mandatory start time.
+      operationId: getMarketFundingHistorySince
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+        - name: since
+          in: query
+          required: true
+          description: |
+            Start timestamp — ISO 8601 string or Unix epoch (seconds or milliseconds).
+            Must resolve to a year between 2020 and 2100.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of records to return (max 500)
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 500
+      responses:
+        '200':
+          description: Successfully retrieved funding history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabAddress:
+                    type: string
+                  since:
+                    type: string
+                    format: date-time
+                    description: Validated ISO 8601 start timestamp
+                  count:
+                    type: integer
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FundingHistoryEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/adl/rankings:
+    get:
+      tags:
+        - ADL
+      summary: Get ADL trigger state and rankings
+      description: |
+        Fetches on-chain slab data, checks ADL (Auto-Deleveraging) trigger conditions,
+        and returns a ranked list of profitable positions eligible for auto-deleveraging.
+        This is a read-only endpoint — it does NOT dispatch any on-chain transactions.
+        Results are cached in-memory for 15 seconds.
+      operationId: getAdlRankings
+      parameters:
+        - name: slab
+          in: query
+          required: true
+          description: Market slab address (Solana public key)
+          schema:
+            type: string
+            pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
+      responses:
+        '200':
+          description: ADL trigger state and ranked positions
+          headers:
+            X-Cache:
+              schema:
+                type: string
+                enum: [HIT, MISS]
+              description: Whether the response was served from the 15s in-memory cache
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdlRankingsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '504':
+          description: Upstream Solana RPC timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Upstream RPC timeout
+                slab: "ABC123..."
+
+  /chart/{mint}:
+    get:
+      tags:
+        - Chart
+      summary: Get OHLCV candle data
+      description: |
+        Returns OHLCV candlestick data for a Solana SPL token by mint address.
+        Data is sourced from GeckoTerminal. Responses are cached in-memory for 60 seconds.
+        Returns an empty candles array (not an error) when no DEX pool is found.
+      operationId: getChart
+      parameters:
+        - name: mint
+          in: path
+          required: true
+          description: Solana SPL token mint address
+          schema:
+            type: string
+            pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
+        - name: timeframe
+          in: query
+          description: Candle timeframe
+          schema:
+            type: string
+            enum: [minute, hour, day]
+            default: hour
+        - name: aggregate
+          in: query
+          description: |
+            Candle aggregation factor. Allowed values depend on timeframe:
+            minute: 1, 5, 15 (default 5); hour: 1, 4, 12 (default 1); day: 1 (default 1).
+            Default varies by timeframe — omit to use the timeframe-specific default.
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          description: Number of candles to return (max 500)
+          schema:
+            type: integer
+            default: 168
+            minimum: 1
+            maximum: 500
+      responses:
+        '200':
+          description: OHLCV candle data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChartResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /open-interest/{slab}:
     get:
@@ -1035,6 +1190,106 @@ components:
         trades24h:
           type: integer
           description: Total number of trades in last 24 hours
+
+    AdlRankingsResponse:
+      type: object
+      properties:
+        slabAddress:
+          type: string
+        pnlPosTot:
+          type: string
+          description: Total positive PnL across all positions (bigint as string)
+        maxPnlCap:
+          type: string
+          description: Maximum PnL cap from market config (bigint as string)
+        insuranceFundBalance:
+          type: string
+          description: Insurance fund balance (bigint as string)
+        insuranceFundFeeRevenue:
+          type: string
+          description: Insurance fund fee revenue (bigint as string)
+        insuranceUtilizationBps:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: Insurance utilization in basis points
+        capExceeded:
+          type: boolean
+          description: Whether total positive PnL exceeds the max PnL cap
+        insuranceDepleted:
+          type: boolean
+          description: Whether the insurance fund is depleted
+        utilizationTriggered:
+          type: boolean
+          description: Whether insurance utilization exceeds the threshold
+        adlNeeded:
+          type: boolean
+          description: Whether auto-deleveraging is needed (capExceeded OR utilizationTriggered)
+        excess:
+          type: string
+          description: Amount by which PnL exceeds cap (bigint as string, "0" if no excess)
+        rankings:
+          type: array
+          description: Ranked profitable positions (empty when adlNeeded is false)
+          items:
+            $ref: '#/components/schemas/AdlRankedPosition'
+
+    AdlRankedPosition:
+      type: object
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+          description: Position rank (1 = highest PnL%)
+        idx:
+          type: integer
+          description: Account index in slab
+        pnlAbs:
+          type: string
+          description: Absolute PnL (bigint as string)
+        capital:
+          type: string
+          description: Position capital (bigint as string)
+        pnlPctMillionths:
+          type: string
+          description: PnL percentage scaled by 1,000,000 (bigint as string)
+
+    ChartResponse:
+      type: object
+      properties:
+        candles:
+          type: array
+          items:
+            $ref: '#/components/schemas/OhlcvCandle'
+        poolAddress:
+          type: string
+          nullable: true
+          description: GeckoTerminal DEX pool address (null if no pool found)
+        cached:
+          type: boolean
+          description: Whether the response was served from cache
+
+    OhlcvCandle:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          description: Unix timestamp in milliseconds
+        open:
+          type: number
+          format: double
+        high:
+          type: number
+          format: double
+        low:
+          type: number
+          format: double
+        close:
+          type: number
+          format: double
+        volume:
+          type: number
+          format: double
 
     Error:
       type: object
