@@ -294,7 +294,8 @@ function verifyWsToken(token: string, expectedSlab?: string): { isValid: boolean
     
     const [slabAddress, timestampStr, signature] = parts;
     const timestamp = parseInt(timestampStr, 10);
-    
+    if (Number.isNaN(timestamp)) return { isValid: false, slabAddress: null };
+
     // Check timestamp is within last 5 minutes and not in the future (30s clock skew tolerance)
     const now = Date.now();
     if (now - timestamp > 5 * 60 * 1000 || timestamp > now + 30_000) {
