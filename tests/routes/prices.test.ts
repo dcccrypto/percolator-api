@@ -122,8 +122,8 @@ describe("prices routes", () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.prices).toHaveLength(2);
-      expect(mockSupabase.order).toHaveBeenCalledWith("timestamp", { ascending: false });
-      expect(mockSupabase.limit).toHaveBeenCalledWith(100);
+      expect(mockSupabase.order).toHaveBeenCalledWith("timestamp", { ascending: true });
+      expect(mockSupabase.limit).toHaveBeenCalledWith(1500);
     });
 
     it("should return 400 for invalid slab", async () => {

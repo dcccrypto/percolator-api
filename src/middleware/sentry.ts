@@ -54,6 +54,8 @@ export function sentryMiddleware(): MiddlewareHandler {
         // Set request context
         scope.setTag("http.method", c.req.method);
         scope.setTag("http.path", c.req.path);
+        const reqId = c.get("requestId");
+        if (reqId) scope.setTag("request_id", reqId);
 
         // Set a hashed API key fingerprint as pseudonymous user ID.
         // Avoid sending any raw key material (even a prefix) to third-party services.
