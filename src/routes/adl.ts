@@ -192,21 +192,17 @@ export function adlRoutes(): Hono {
     }
 
     let engine: ReturnType<typeof parseEngine>;
-    let cfg: ReturnType<typeof parseConfig> & { maxPnlCap?: bigint };
+    let cfg: ReturnType<typeof parseConfig>;
     try {
       engine = parseEngine(data);
-      // NOTE: parseConfig returns MarketConfig. The `maxPnlCap` field was added in a
-      // later SDK version. We cast to `any` to read it where available, falling back
-      // to 0n on older SDK builds. When the API SDK is bumped to ≥47e3799, remove the cast.
-      cfg = parseConfig(data) as ReturnType<typeof parseConfig> & { maxPnlCap?: bigint };
+      cfg = parseConfig(data);
     } catch (err) {
       logger.error("parseEngine/parseConfig failed", { slab, error: err instanceof Error ? err.message : String(err) });
       return c.json({ error: "Slab data could not be parsed — may be uninitialized or corrupted" }, 400);
     }
 
     const pnlPosTot = engine.pnlPosTot;
-    // maxPnlCap fallback to 0n disables cap-exceeded trigger on older SDK builds
-    const maxPnlCap: bigint = cfg.maxPnlCap ?? 0n;
+    const maxPnlCap: bigint = cfg.maxPnlCap;
     const insBalance = engine.insuranceFund.balance;
     const insFeeRevenue = engine.insuranceFund.feeRevenue;
 
