@@ -7,6 +7,11 @@ const logger = createLogger("api:oracle-router");
 
 // Simple in-memory cache: mint → { result, expiresAt }
 const cache = new Map<string, { result: PriceRouterResult; expiresAt: number }>();
+// In-flight request coalescing: mint → pending resolvePrice promise. Used to
+// prevent thundering-herd amplification when N concurrent requests miss cache
+// for the same mint — only the first triggers an upstream call; the rest await
+// the same promise.
+const inflight = new Map<string, Promise<PriceRouterResult>>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_CACHE_SIZE = 500;
 
@@ -42,17 +47,32 @@ export function oracleRouterRoutes(): Hono {
       return c.json({ ...cached.result, cached: true });
     }
 
+    // Coalesce concurrent requests for the same mint: if a fetch is already
+    // in flight, await the same promise instead of starting a new one. The
+    // first request writes the cache and clears the inflight entry only after
+    // the cache is populated, so a request arriving immediately afterwards
+    // sees a fresh cache hit.
+    let inFlightPromise = inflight.get(mint);
+    if (!inFlightPromise) {
+      inFlightPromise = resolvePrice(mint, AbortSignal.timeout(10_000))
+        .then((result) => {
+          if (cache.size >= MAX_CACHE_SIZE) {
+            const oldestKey = cache.keys().next().value;
+            if (oldestKey) cache.delete(oldestKey);
+          }
+          cache.set(mint, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+          inflight.delete(mint);
+          return result;
+        })
+        .catch((err) => {
+          inflight.delete(mint);
+          throw err;
+        });
+      inflight.set(mint, inFlightPromise);
+    }
+
     try {
-      const result = await resolvePrice(mint, AbortSignal.timeout(10_000));
-
-      // Cache the result (with max size enforcement)
-      if (cache.size >= MAX_CACHE_SIZE) {
-        // Delete oldest entry
-        const oldestKey = cache.keys().next().value;
-        if (oldestKey) cache.delete(oldestKey);
-      }
-      cache.set(mint, { result, expiresAt: Date.now() + CACHE_TTL_MS });
-
+      const result = await inFlightPromise;
       return c.json({ ...result, cached: false });
     } catch (err: any) {
       const detail = err instanceof Error ? err.message : String(err);
