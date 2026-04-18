@@ -97,6 +97,43 @@ describe("prices routes", () => {
       const data = await res.json();
       expect(data.markets).toHaveLength(0);
     });
+
+    it("should null out invalid price fields (NaN, negative, zero, absurd)", async () => {
+      const mockMarkets = [
+        {
+          slab_address: "11111111111111111111111111111111",
+          last_price: -5,                  // negative → null
+          mark_price: 0,                   // zero → null
+          index_price: 50000000000,        // valid (clamped under 1e9)... wait this is > 1e9
+          updated_at: "2025-01-01T00:00:00Z",
+        },
+        {
+          slab_address: "22222222222222222222222222222222",
+          last_price: Number.NaN,          // NaN → null
+          mark_price: Number.POSITIVE_INFINITY, // Infinity → null
+          index_price: 250.5,              // valid
+          updated_at: "2025-01-01T00:00:00Z",
+        },
+      ];
+
+      mockSupabase.not.mockResolvedValue({ data: mockMarkets, error: null });
+
+      const app = priceRoutes();
+      const res = await app.request("/prices/markets");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.markets[0].last_price).toBeNull();
+      expect(data.markets[0].mark_price).toBeNull();
+      // 50000000000 > 1_000_000_000 → out of sane USD bound → null
+      expect(data.markets[0].index_price).toBeNull();
+      expect(data.markets[1].last_price).toBeNull();
+      expect(data.markets[1].mark_price).toBeNull();
+      expect(data.markets[1].index_price).toBe(250.5);
+      // Slab and timestamp should still be returned
+      expect(data.markets[0].slab_address).toBe("11111111111111111111111111111111");
+      expect(data.markets[0].updated_at).toBe("2025-01-01T00:00:00Z");
+    });
   });
 
   describe("GET /prices/:slab", () => {
@@ -122,8 +159,8 @@ describe("prices routes", () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.prices).toHaveLength(2);
-      expect(mockSupabase.order).toHaveBeenCalledWith("timestamp", { ascending: false });
-      expect(mockSupabase.limit).toHaveBeenCalledWith(100);
+      expect(mockSupabase.order).toHaveBeenCalledWith("timestamp", { ascending: true });
+      expect(mockSupabase.limit).toHaveBeenCalledWith(1500);
     });
 
     it("should return 400 for invalid slab", async () => {
@@ -158,6 +195,29 @@ describe("prices routes", () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.prices).toHaveLength(0);
+    });
+
+    it("should drop rows with invalid price_e6 (negative, NaN, zero, absurd)", async () => {
+      const mockPrices = [
+        { slab_address: "11111111111111111111111111111111", price_e6: 50000000000, timestamp: "2025-01-01T00:00:00Z" }, // valid ($50k)
+        { slab_address: "11111111111111111111111111111111", price_e6: -1,           timestamp: "2025-01-01T00:01:00Z" }, // negative
+        { slab_address: "11111111111111111111111111111111", price_e6: 0,            timestamp: "2025-01-01T00:02:00Z" }, // zero
+        { slab_address: "11111111111111111111111111111111", price_e6: Number.NaN,   timestamp: "2025-01-01T00:03:00Z" }, // NaN
+        { slab_address: "11111111111111111111111111111111", price_e6: 50100000000,  timestamp: "2025-01-01T00:04:00Z" }, // valid
+        { slab_address: "11111111111111111111111111111111", price_e6: null,         timestamp: "2025-01-01T00:05:00Z" }, // missing
+        { slab_address: "11111111111111111111111111111111", price_e6: 1e16,         timestamp: "2025-01-01T00:06:00Z" }, // > 1e15 cap
+      ];
+
+      mockSupabase.limit.mockResolvedValue({ data: mockPrices, error: null });
+
+      const app = priceRoutes();
+      const res = await app.request("/prices/11111111111111111111111111111111");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.prices).toHaveLength(2);
+      expect(data.prices[0].price_e6).toBe(50000000000);
+      expect(data.prices[1].price_e6).toBe(50100000000);
     });
   });
 });
