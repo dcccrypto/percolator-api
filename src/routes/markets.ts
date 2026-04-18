@@ -5,6 +5,7 @@ import { cacheMiddleware } from "../middleware/cache.js";
 import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine } from "@percolatorct/sdk";
 import { getConnection, getSupabase, getNetwork, createLogger, sanitizeSlabAddress, truncateErrorMessage } from "@percolator/shared";
+import { withRpcTimeout, RpcTimeoutError } from "../utils/rpc-timeout.js";
 
 const logger = createLogger("api:markets");
 
@@ -123,7 +124,10 @@ export function marketRoutes(): Hono {
     try {
       const connection = getConnection();
       const slabPubkey = new PublicKey(slab);
-      const data = await fetchSlab(connection, slabPubkey);
+      const data = await withRpcTimeout(
+        fetchSlab(connection, slabPubkey),
+        `fetchSlab(${slab})`,
+      );
       const header = parseHeader(data);
       const cfg = parseConfig(data);
       const engine = parseEngine(data);
@@ -150,6 +154,10 @@ export function marketRoutes(): Hono {
         },
       });
     } catch (err) {
+      if (err instanceof RpcTimeoutError) {
+        logger.warn("RPC timeout fetching market", { slab, timeoutMs: err.timeoutMs });
+        return c.json({ error: "Upstream RPC timeout" }, 504);
+      }
       const detail = err instanceof Error ? err.message : "Unknown error";
       const isNotFound = detail.includes("not found") || detail.includes("Account does not exist");
       if (isNotFound) {
