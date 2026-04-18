@@ -70,12 +70,14 @@ export function marketRoutes(): Hono {
       c
     );
     
-    // If result is a Response (error case), return it directly
+    // If result is a Response (error case — DB failed AND no usable cache),
+    // return it directly. Otherwise unwrap the DbCacheResult; staleness
+    // headers are already set on the context by the middleware.
     if (result instanceof Response) {
       return result;
     }
-    
-    return c.json({ markets: result });
+
+    return c.json({ markets: result.data });
   });
 
   // GET /markets/stats — all market stats from DB (filtered by network)

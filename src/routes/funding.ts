@@ -88,10 +88,13 @@ export function fundingRoutes(): Hono {
       c
     );
 
-    // withDbCacheFallback returns a Response on failure (503 with stale data or error)
+    // withDbCacheFallback returns a Response on failure (503 when both the
+    // query failed and no usable cache exists). On success — fresh or stale
+    // fallback — it returns a DbCacheResult; staleness HTTP headers are
+    // already set on the context by the middleware.
     if (result instanceof Response) return result;
 
-    return c.json(result);
+    return c.json(result.data);
   });
 
   /**
