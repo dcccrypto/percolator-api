@@ -80,7 +80,7 @@ export function insuranceRoutes(): Hono {
       logger.error("Error fetching insurance data", { slab, error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
       return c.json({ 
         error: "Failed to fetch insurance data",
-        ...(process.env.NODE_ENV !== "production" && { details: err instanceof Error ? err.message : String(err) })
+        ...(process.env.NODE_ENV !== "production" && { details: truncateErrorMessage(err instanceof Error ? err.message : String(err), 200) })
       }, 500);
     }
   });
