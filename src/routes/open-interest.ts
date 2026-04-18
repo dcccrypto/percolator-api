@@ -77,12 +77,15 @@ export function openInterestRoutes(): Hono {
         }, 404);
       }
 
-      // Fetch historical OI data
+      // Fetch historical OI data in ascending order (oldest→newest) so chart
+      // components can feed the series directly into lightweight-charts setData(),
+      // which requires strictly ascending timestamps.  Previously returned DESC
+      // (newest first) — same issue that was fixed in prices.ts (see GH#xxx).
       const { data: history, error: historyError } = await getSupabase()
         .from("oi_history")
         .select("timestamp, total_oi, net_lp_pos")
         .eq("market_slab", slab)
-        .order("timestamp", { ascending: false })
+        .order("timestamp", { ascending: true })
         .limit(100);
 
       if (historyError) {
