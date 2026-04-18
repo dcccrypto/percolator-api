@@ -178,4 +178,45 @@ describe("isClientIpBlocked", () => {
     expect(check("192.168.1.55")).toBe(true);
     expect(check("192.168.2.1")).toBe(false);
   });
+
+  it("matches IPv6-mapped IPv4 client against bare IPv4 blocklist entry", async () => {
+    const check = await loadIsClientIpBlocked("88.97.223.158");
+    expect(check("::ffff:88.97.223.158")).toBe(true);
+  });
+
+  it("matches bare IPv4 client against IPv6-mapped IPv4 blocklist entry", async () => {
+    const check = await loadIsClientIpBlocked("::ffff:88.97.223.158");
+    expect(check("88.97.223.158")).toBe(true);
+  });
+
+  it("matches IPv6-mapped IPv4 client against an IPv4 CIDR entry", async () => {
+    const check = await loadIsClientIpBlocked("192.168.1.0/24");
+    expect(check("::ffff:192.168.1.55")).toBe(true);
+  });
+
+  it("silently drops invalid exact-IP entries while keeping valid ones active", async () => {
+    const check = await loadIsClientIpBlocked("not-an-ip,999.999.999.999,88.97.223.158");
+    expect(check("88.97.223.158")).toBe(true);
+    expect(check("1.2.3.4")).toBe(false);
+  });
+});
+
+describe("ipBlocklist middleware — IPv6-mapped IPv4 normalization", () => {
+  beforeEach(() => {
+    process.env.TRUSTED_PROXY_DEPTH = "1";
+  });
+
+  it("blocks an IPv6-mapped IPv4 client when blocklist holds the bare IPv4", async () => {
+    const fn = await loadMiddlewareWithEnv("88.97.223.158");
+    const app = makeApp(fn);
+    const res = await app.request(makeRequest("::ffff:88.97.223.158"));
+    expect(res.status).toBe(403);
+  });
+
+  it("blocks a bare IPv4 client when blocklist holds the IPv6-mapped form", async () => {
+    const fn = await loadMiddlewareWithEnv("::ffff:88.97.223.158");
+    const app = makeApp(fn);
+    const res = await app.request(makeRequest("88.97.223.158"));
+    expect(res.status).toBe(403);
+  });
 });

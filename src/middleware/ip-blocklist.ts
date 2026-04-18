@@ -66,7 +66,11 @@ function parseEntry(entry: string): ParsedEntry | null {
     const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
     return { type: "cidr", raw: entry, network: (network & mask) >>> 0, mask };
   }
-  return { type: "exact", raw: entry, ip: entry };
+  // Exact entry: normalize (strip ::ffff: IPv6-mapped prefix) and validate
+  // so that operator-supplied entries match normalized client IPs symmetrically.
+  const normalized = normalizeIp(entry);
+  if (ipToInt(normalized) === -1) return null;
+  return { type: "exact", raw: entry, ip: normalized };
 }
 
 const PARSED_BLOCKLIST: ParsedEntry[] = RAW_BLOCKLIST.map((entry) => {
@@ -162,5 +166,5 @@ export function ipBlocklist() {
  * handler, which runs before Hono middleware gets a chance to fire.
  */
 export function isClientIpBlocked(ip: string): boolean {
-  return isBlocked(ip);
+  return isBlocked(normalizeIp(ip));
 }
