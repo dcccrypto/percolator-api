@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { priceRoutes } from "../../src/routes/prices.js";
+import { clearDbCache } from "../../src/middleware/db-cache-fallback.js";
 
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
@@ -30,6 +31,7 @@ describe("prices routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearDbCache();
 
     mockSupabase = {
       from: vi.fn(() => mockSupabase),
@@ -73,18 +75,19 @@ describe("prices routes", () => {
       expect(data.markets[0].slab_address).toBe("11111111111111111111111111111111");
     });
 
-    it("should handle database errors", async () => {
-      mockSupabase.not.mockResolvedValue({ 
-        data: null, 
-        error: new Error("Database error") 
+    it("should handle database errors with 503 (no stale cache)", async () => {
+      mockSupabase.not.mockResolvedValue({
+        data: null,
+        error: new Error("Database error")
       });
 
       const app = priceRoutes();
       const res = await app.request("/prices/markets");
 
-      expect(res.status).toBe(500);
+      // withDbCacheFallback returns 503 when DB fails and no stale cache is available
+      expect(res.status).toBe(503);
       const data = await res.json();
-      expect(data.error).toBe("Failed to fetch prices");
+      expect(data.error).toBe("Database temporarily unavailable");
     });
 
     it("should handle empty markets list", async () => {
@@ -122,8 +125,8 @@ describe("prices routes", () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.prices).toHaveLength(2);
-      expect(mockSupabase.order).toHaveBeenCalledWith("timestamp", { ascending: false });
-      expect(mockSupabase.limit).toHaveBeenCalledWith(100);
+      expect(mockSupabase.order).toHaveBeenCalledWith("timestamp", { ascending: true });
+      expect(mockSupabase.limit).toHaveBeenCalledWith(1500);
     });
 
     it("should return 400 for invalid slab", async () => {

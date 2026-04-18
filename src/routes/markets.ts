@@ -80,20 +80,25 @@ export function marketRoutes(): Hono {
 
   // GET /markets/stats — all market stats from DB (filtered by network)
   app.get("/markets/stats", async (c) => {
-    try {
-      const { data, error } = await getSupabase()
-        .from("markets_with_stats")
-        .select("slab_address, total_open_interest, total_accounts, last_crank_slot, last_price, mark_price, index_price, funding_rate, net_lp_pos, updated_at")
-        .eq("network", getNetwork())
-        .not("slab_address", "is", null);
-      if (error) throw error;
-      return c.json({ stats: data ?? [] });
-    } catch (err) {
-      logger.error("Error fetching all market stats", {
-        error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120),
-      });
-      return c.json({ error: "Failed to fetch market stats" }, 500);
+    const result = await withDbCacheFallback(
+      "markets:stats",
+      async () => {
+        const { data, error } = await getSupabase()
+          .from("markets_with_stats")
+          .select("slab_address, total_open_interest, total_accounts, last_crank_slot, last_price, mark_price, index_price, funding_rate, net_lp_pos, updated_at")
+          .eq("network", getNetwork())
+          .not("slab_address", "is", null);
+        if (error) throw error;
+        return data ?? [];
+      },
+      c
+    );
+
+    if (result instanceof Response) {
+      return result;
     }
+
+    return c.json({ stats: result });
   });
 
   // GET /markets/:slab/stats — single market stats from DB

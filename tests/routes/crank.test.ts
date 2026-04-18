@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { crankStatusRoutes } from "../../src/routes/crank.js";
+import { clearDbCache } from "../../src/middleware/db-cache-fallback.js";
 
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
@@ -45,6 +46,7 @@ describe("crank routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearDbCache();
 
     mockSupabase = {
       from: vi.fn(() => chainable({ data: [], error: null })),
@@ -112,7 +114,7 @@ describe("crank routes", () => {
       expect(data.markets[0].updated_at).toBeNull();
     });
 
-    it("should handle database errors", async () => {
+    it("should handle database errors with 503 (no stale cache)", async () => {
       mockSupabase.from.mockReturnValue(chainable({
         data: null,
         error: new Error("Database error"),
@@ -121,9 +123,10 @@ describe("crank routes", () => {
       const app = crankStatusRoutes();
       const res = await app.request("/crank/status");
 
-      expect(res.status).toBe(500);
+      // withDbCacheFallback returns 503 when DB fails and no stale cache is available
+      expect(res.status).toBe(503);
       const data = await res.json();
-      expect(data.error).toBe("Failed to fetch crank status");
+      expect(data.error).toBe("Database temporarily unavailable");
     });
 
     it("should return all market stats fields", async () => {

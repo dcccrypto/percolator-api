@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getSupabase, getNetwork, createLogger, truncateErrorMessage } from "@percolator/shared";
 import { validateSlab } from "../middleware/validateSlab.js";
+import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
 
 const logger = createLogger("api:prices");
 
@@ -8,20 +9,25 @@ export function priceRoutes(): Hono {
   const app = new Hono();
 
   app.get("/prices/markets", async (c) => {
-    try {
-      const { data, error } = await getSupabase()
-        .from("markets_with_stats")
-        .select("slab_address, last_price, mark_price, index_price, updated_at")
-        .eq("network", getNetwork())
-        .not("slab_address", "is", null);
-      if (error) throw error;
-      return c.json({ markets: data ?? [] });
-    } catch (err) {
-      logger.error("Error fetching market prices", {
-        error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120),
-      });
-      return c.json({ error: "Failed to fetch prices" }, 500);
+    const result = await withDbCacheFallback(
+      "prices:markets",
+      async () => {
+        const { data, error } = await getSupabase()
+          .from("markets_with_stats")
+          .select("slab_address, last_price, mark_price, index_price, updated_at")
+          .eq("network", getNetwork())
+          .not("slab_address", "is", null);
+        if (error) throw error;
+        return data ?? [];
+      },
+      c
+    );
+
+    if (result instanceof Response) {
+      return result;
     }
+
+    return c.json({ markets: result });
   });
 
   app.get("/prices/:slab", validateSlab, async (c) => {
