@@ -21,6 +21,7 @@ import { insuranceRoutes } from "./routes/insurance.js";
 import { openInterestRoutes } from "./routes/open-interest.js";
 import { statsRoutes } from "./routes/stats.js";
 import { chartRoutes } from "./routes/chart.js";
+import { candleRoutes } from "./routes/candles.js";
 import { docsRoutes } from "./routes/docs.js";
 import { adlRoutes } from "./routes/adl.js";
 import { setupWebSocket, cleanupPriceUpdateTimers } from "./routes/ws.js";
@@ -200,6 +201,7 @@ app.route("/", insuranceRoutes());
 app.route("/", openInterestRoutes());
 app.route("/", statsRoutes());
 app.route("/", chartRoutes());
+app.route("/", candleRoutes());
 app.route("/", adlRoutes());
 app.route("/", docsRoutes());
 
