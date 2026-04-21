@@ -25,6 +25,7 @@ import { candleRoutes } from "./routes/candles.js";
 import { docsRoutes } from "./routes/docs.js";
 import { adlRoutes } from "./routes/adl.js";
 import { setupWebSocket, cleanupPriceUpdateTimers } from "./routes/ws.js";
+import { OraclePriceBroadcaster } from "./services/OraclePriceBroadcaster.js";
 import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
 import { ipBlocklist } from "./middleware/ip-blocklist.js";
 import { cacheMiddleware } from "./middleware/cache.js";
@@ -324,6 +325,16 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 });
 
 const wss = setupWebSocket(server as unknown as import("node:http").Server);
+
+// Bridge oracle_prices INSERTs → local eventBus → WS clients. Without this
+// the cross-process price.updated events from the indexer never reach WS
+// subscribers, and the frontend only sees new prices on page refresh.
+const oraclePriceBroadcaster = new OraclePriceBroadcaster();
+oraclePriceBroadcaster.start().catch((err) => {
+  logger.error("OraclePriceBroadcaster start failed", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+});
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
