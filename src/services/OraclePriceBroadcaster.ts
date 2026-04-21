@@ -39,6 +39,7 @@ export class OraclePriceBroadcaster {
     this.started = true;
 
     const network = getNetwork();
+    logger.info("oracle-price broadcaster starting", { network });
     try {
       const sb = getSupabase();
       this.channel = sb
@@ -60,11 +61,12 @@ export class OraclePriceBroadcaster {
                 : Number(row.price_e6);
               if (!Number.isFinite(priceE6) || priceE6 <= 0) return;
 
+              logger.debug("oracle_prices insert received", {
+                slab: row.slab_address,
+                priceE6,
+              });
               eventBus.publish("price.updated", row.slab_address, {
                 priceE6,
-                // For a Hyperp, mark and index converge on the oracle value
-                // pushed here. The frontend uses whichever the ws.ts handler
-                // formats into the outbound JSON.
                 markPriceE6: priceE6,
                 indexPriceE6: priceE6,
                 source: "oracle_prices",
@@ -77,11 +79,18 @@ export class OraclePriceBroadcaster {
             }
           },
         )
-        .subscribe((status) => {
+        .subscribe((status, err) => {
+          // Log every status transition so we can see where we are if a
+          // SUBSCRIBED never lands. Supabase Realtime emits: CHANNEL_ERROR,
+          // TIMED_OUT, CLOSED, SUBSCRIBED — plus occasional JOINING.
+          const fields: Record<string, unknown> = { status, network };
+          if (err) fields.error = err instanceof Error ? err.message : String(err);
           if (status === "SUBSCRIBED") {
-            logger.info("oracle-price broadcaster subscribed", { network });
-          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-            logger.error("oracle-price broadcaster channel status", { status, network });
+            logger.info("oracle-price broadcaster subscribed", fields);
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            logger.error("oracle-price broadcaster channel problem", fields);
+          } else {
+            logger.info("oracle-price broadcaster status", fields);
           }
         });
     } catch (err) {
