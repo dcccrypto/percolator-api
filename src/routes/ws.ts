@@ -927,13 +927,17 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
                   if (stats && stats.last_price) {
                     if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_BUFFER_BYTES) {
+                      // market_stats.last_price / mark_price / index_price are
+                      // stored as DOLLAR values (not e6-scaled), unlike
+                      // oracle_prices.price_e6. Previously we divided again by
+                      // 1e6 and sent \$0.00008555 on subscribe.
                       ws.send(
                         JSON.stringify({
                           type: "price",
                           slab,
-                          price: stats.last_price / 1_000_000,
-                          markPrice: stats.mark_price ? stats.mark_price / 1_000_000 : undefined,
-                          indexPrice: stats.index_price ? stats.index_price / 1_000_000 : undefined,
+                          price: stats.last_price,
+                          markPrice: stats.mark_price ?? undefined,
+                          indexPrice: stats.index_price ?? undefined,
                           timestamp: stats.updated_at,
                         }),
                       );
