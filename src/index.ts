@@ -30,6 +30,7 @@ import { OraclePriceBroadcaster } from "./services/OraclePriceBroadcaster.js";
 import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
 import { ipBlocklist } from "./middleware/ip-blocklist.js";
 import { cacheMiddleware } from "./middleware/cache.js";
+import { securityHeaders } from "./middleware/security-headers.js";
 
 const logger = createLogger("api");
 
@@ -162,38 +163,7 @@ app.use("*", compress());
 app.use("*", sentryMiddleware());
 
 // Security Headers Middleware
-app.use("*", async (c, next) => {
-  await next();
-  
-  c.header("X-Content-Type-Options", "nosniff");
-  c.header("X-Frame-Options", "DENY");
-  c.header("X-XSS-Protection", "0");
-  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
-  c.header("X-DNS-Prefetch-Control", "off");
-  c.header("X-Download-Options", "noopen");
-  c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()");
-  
-  c.header("Content-Security-Policy", "default-src 'none'; script-src 'self' unpkg.com; style-src 'self' unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'");
-  
-  // Always send HSTS in production (proxy terminates TLS so x-forwarded-proto may be stripped by a MitM)
-  if (process.env.NODE_ENV === "production") {
-    c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-  } else {
-    const proto = c.req.header("x-forwarded-proto") || "http";
-    if (proto === "https") {
-      c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-    }
-  }
-
-  // Prevent CDNs/proxies from caching responses by default.
-  // Financial data endpoints (prices, funding, trades, stats) must not be
-  // served stale by intermediate proxies.  Endpoints that intentionally
-  // cache (e.g. /chart, cacheMiddleware routes) set their own
-  // Cache-Control header which will already be present on the response.
-  if (!c.res.headers.has("Cache-Control")) {
-    c.header("Cache-Control", "no-store");
-  }
-});
+app.use("*", securityHeaders());
 
 // Rate Limiting Middleware
 app.use("*", async (c, next) => {
