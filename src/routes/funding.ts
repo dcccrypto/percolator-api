@@ -257,7 +257,7 @@ export function fundingRoutes(): Hono {
    *
    * GH#36
    */
-  app.get("/funding/:slab/historySince", validateSlab, async (c) => {
+  app.get("/funding/:slab/historySince", cacheMiddleware(30), validateSlab, async (c) => {
     const slab = c.req.param("slab");
     if (!slab) return c.json({ error: "slab required" }, 400);
 
@@ -308,9 +308,12 @@ export function fundingRoutes(): Hono {
     }
 
     try {
-      let history = await getFundingHistorySince(slab, validatedSince);
+      // #186: pass the row cap to the query so the DB bounds the read (LIMIT) instead of
+      // materializing the entire matching set and trimming in JS. The slice below is now
+      // a defensive no-op.
+      let history = await getFundingHistorySince(slab, validatedSince, limit);
 
-      // Enforce row cap
+      // Enforce row cap (defensive — the query already applies LIMIT)
       if (history.length > limit) {
         history = history.slice(0, limit);
       }
@@ -360,7 +363,7 @@ export function fundingRoutes(): Hono {
    * - limit: number of records (default 100, max 1000)
    * - since: ISO timestamp (default: 24h ago)
    */
-  app.get("/funding/:slab/history", validateSlab, async (c) => {
+  app.get("/funding/:slab/history", cacheMiddleware(30), validateSlab, async (c) => {
     const slab = c.req.param("slab");
     if (!slab) return c.json({ error: "slab required" }, 400);
     const limitParam = c.req.query("limit");
@@ -396,8 +399,10 @@ export function fundingRoutes(): Hono {
           }
           validatedSince = d.toISOString();
         }
-        history = await getFundingHistorySince(slab, validatedSince);
-        // PERC-8178: Enforce row cap on since-based queries
+        // #186: bound the DB read (LIMIT MAX_ROWS) so a far-past `since` can't force a full
+        // per-slab scan + full materialization; the slice below is now a defensive no-op.
+        history = await getFundingHistorySince(slab, validatedSince, MAX_ROWS);
+        // PERC-8178: Enforce row cap on since-based queries (defensive — query applies LIMIT)
         if (history.length > MAX_ROWS) {
           history = history.slice(0, MAX_ROWS);
         }

@@ -341,7 +341,7 @@ describe("funding routes", () => {
       const app = fundingRoutes();
       await app.request("/funding/11111111111111111111111111111111/history?since=2025-01-01T00:00:00Z");
 
-      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2025-01-01T00:00:00.000Z");
+      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2025-01-01T00:00:00.000Z", expect.any(Number));
     });
 
     it("should accept unix epoch seconds as since param (PERC-8178)", async () => {
@@ -351,7 +351,7 @@ describe("funding routes", () => {
       // 1704067200 = 2024-01-01T00:00:00Z
       await app.request("/funding/11111111111111111111111111111111/history?since=1704067200");
 
-      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2024-01-01T00:00:00.000Z");
+      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2024-01-01T00:00:00.000Z", expect.any(Number));
     });
 
     it("should accept unix epoch milliseconds as since param (PERC-8178)", async () => {
@@ -361,7 +361,7 @@ describe("funding routes", () => {
       // 1704067200000 = 2024-01-01T00:00:00Z
       await app.request("/funding/11111111111111111111111111111111/history?since=1704067200000");
 
-      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2024-01-01T00:00:00.000Z");
+      expect(getFundingHistorySince).toHaveBeenCalledWith("11111111111111111111111111111111", "2024-01-01T00:00:00.000Z", expect.any(Number));
     });
 
     it("should return 400 for invalid since param (PERC-8178)", async () => {
@@ -635,7 +635,8 @@ describe("funding routes", () => {
       });
       expect(vi.mocked(getFundingHistorySince)).toHaveBeenCalledWith(
         VALID_SLAB,
-        new Date(VALID_SINCE).toISOString()
+        new Date(VALID_SINCE).toISOString(),
+        expect.any(Number)
       );
     });
 
