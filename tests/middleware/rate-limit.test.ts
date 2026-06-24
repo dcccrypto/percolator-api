@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Hono } from "hono";
 
 vi.mock("@percolator/shared", () => ({
@@ -9,11 +9,18 @@ vi.mock("@percolator/shared", () => ({
 }));
 
 import { readRateLimit, writeRateLimit } from "../../src/middleware/rate-limit.js";
+import { resetSharedStore, InMemoryStore } from "../../src/middleware/shared-store.js";
 
 describe("rate-limit middleware", () => {
   beforeEach(() => {
-    // Clear rate limit buckets before each test by creating fresh middleware
     vi.clearAllMocks();
+    // Reset the shared store singleton so each test starts with a fresh
+    // in-memory store and buckets don't leak across tests.
+    resetSharedStore(new InMemoryStore());
+  });
+
+  afterEach(() => {
+    resetSharedStore();
   });
 
   describe("readRateLimit", () => {

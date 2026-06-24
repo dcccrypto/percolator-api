@@ -1,32 +1,19 @@
 import type { Context, Next } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { createLogger } from "@percolator/shared";
+import { getSharedStore } from "./shared-store.js";
 
 const logger = createLogger("api:rate-limit");
 
-interface RateBucket {
-  count: number;
-  resetAt: number;
-}
-
-const readBuckets = new Map<string, RateBucket>();
-const writeBuckets = new Map<string, RateBucket>();
 const WINDOW_MS = 60_000; // 1 minute
 const READ_LIMIT = 100; // 100 requests per minute for reads
 const WRITE_LIMIT = 10; // 10 requests per minute for writes
-const MAX_RATE_LIMIT_ENTRIES = 50_000; // cap to prevent OOM from distributed DDoS
-// Number of leading entries the eviction path scans for an already-expired
-// bucket before falling back to deleting the oldest insertion. Bounded so the
-// per-request cost stays O(1) even when the map is full.
-const EVICTION_SCAN_LIMIT = 32;
+const MAX_RATE_LIMIT_ENTRIES = 50_000; // cap to prevent OOM from distributed DDoS (in-memory fallback only)
 
-// Clean up expired buckets every minute. Aligned with WINDOW_MS so most
-// expired entries are reclaimed within one window, keeping the eviction
-// scan effective even under sustained pressure from many fresh IPs.
+// Clean up expired buckets every minute (in-memory fallback only — Redis
+// handles its own TTL-based eviction automatically).
 setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of readBuckets) if (v.resetAt <= now) readBuckets.delete(k);
-  for (const [k, v] of writeBuckets) if (v.resetAt <= now) writeBuckets.delete(k);
+  getSharedStore().evictExpiredRateBuckets().catch(() => undefined);
 }, 60_000).unref();
 
 /**
@@ -83,62 +70,6 @@ function getClientIp(c: Context): string | null {
   }
 }
 
-interface RateLimitResult {
-  allowed: boolean;
-  limit: number;
-  remaining: number;
-  reset: number;
-}
-
-function checkLimit(
-  buckets: Map<string, RateBucket>, 
-  ip: string, 
-  limit: number
-): RateLimitResult {
-  const now = Date.now();
-  let bucket = buckets.get(ip);
-  
-  if (!bucket || bucket.resetAt <= now) {
-    if (!bucket && buckets.size >= MAX_RATE_LIMIT_ENTRIES) {
-      // Prefer evicting an already-expired bucket so legitimate users with
-      // an active rate-limit window are not displaced by attackers cycling
-      // through fresh IPs. Bound the scan so the per-request cost stays
-      // O(1) even when the whole map is active.
-      let evicted = false;
-      let scanned = 0;
-      for (const [k, v] of buckets) {
-        if (scanned >= EVICTION_SCAN_LIMIT) break;
-        scanned++;
-        if (v.resetAt <= now) {
-          buckets.delete(k);
-          evicted = true;
-          break;
-        }
-      }
-      // Fallback: if nothing in the scan window has expired, drop the
-      // oldest insertion as a last resort. This still happens but only
-      // when the entire scan window is occupied by genuinely-active IPs.
-      if (!evicted) {
-        const oldestKey = buckets.keys().next().value;
-        if (oldestKey !== undefined) buckets.delete(oldestKey);
-      }
-    }
-    bucket = { count: 0, resetAt: now + WINDOW_MS };
-    buckets.set(ip, bucket);
-  }
-  
-  bucket.count++;
-  const allowed = bucket.count <= limit;
-  const remaining = Math.max(0, limit - bucket.count);
-  
-  return {
-    allowed,
-    limit,
-    remaining,
-    reset: Math.floor(bucket.resetAt / 1000), // Unix timestamp in seconds
-  };
-}
-
 export function readRateLimit() {
   return async (c: Context, next: Next) => {
     const ip = getClientIp(c);
@@ -146,24 +77,31 @@ export function readRateLimit() {
       logger.warn("Rejected request: could not determine client IP", { path: c.req.path });
       return c.json({ error: "Bad request" }, 400);
     }
-    const result = checkLimit(readBuckets, ip, READ_LIMIT);
-    
-    // Set rate limit headers
-    c.header("X-RateLimit-Limit", result.limit.toString());
-    c.header("X-RateLimit-Remaining", result.remaining.toString());
-    c.header("X-RateLimit-Reset", result.reset.toString());
-    
-    if (!result.allowed) {
-      const retryAfter = Math.max(1, result.reset - Math.floor(Date.now() / 1000));
+
+    const bucket = await getSharedStore().incrementRateBucket(
+      `read:${ip}`,
+      WINDOW_MS,
+      MAX_RATE_LIMIT_ENTRIES
+    );
+
+    const remaining = Math.max(0, READ_LIMIT - bucket.count);
+    const reset = Math.floor(bucket.resetAt / 1000);
+
+    c.header("X-RateLimit-Limit", READ_LIMIT.toString());
+    c.header("X-RateLimit-Remaining", remaining.toString());
+    c.header("X-RateLimit-Reset", reset.toString());
+
+    if (bucket.count > READ_LIMIT) {
+      const retryAfter = Math.max(1, reset - Math.floor(Date.now() / 1000));
       c.header("Retry-After", retryAfter.toString());
-      logger.warn("Read rate limit exceeded", { 
-        ip, 
+      logger.warn("Read rate limit exceeded", {
+        ip,
         path: c.req.path,
-        limit: READ_LIMIT 
+        limit: READ_LIMIT,
       });
       return c.json({ error: "Rate limit exceeded" }, 429);
     }
-    
+
     return next();
   };
 }
@@ -175,25 +113,32 @@ export function writeRateLimit() {
       logger.warn("Rejected request: could not determine client IP", { path: c.req.path, method: c.req.method });
       return c.json({ error: "Bad request" }, 400);
     }
-    const result = checkLimit(writeBuckets, ip, WRITE_LIMIT);
-    
-    // Set rate limit headers
-    c.header("X-RateLimit-Limit", result.limit.toString());
-    c.header("X-RateLimit-Remaining", result.remaining.toString());
-    c.header("X-RateLimit-Reset", result.reset.toString());
-    
-    if (!result.allowed) {
-      const retryAfter = Math.max(1, result.reset - Math.floor(Date.now() / 1000));
+
+    const bucket = await getSharedStore().incrementRateBucket(
+      `write:${ip}`,
+      WINDOW_MS,
+      MAX_RATE_LIMIT_ENTRIES
+    );
+
+    const remaining = Math.max(0, WRITE_LIMIT - bucket.count);
+    const reset = Math.floor(bucket.resetAt / 1000);
+
+    c.header("X-RateLimit-Limit", WRITE_LIMIT.toString());
+    c.header("X-RateLimit-Remaining", remaining.toString());
+    c.header("X-RateLimit-Reset", reset.toString());
+
+    if (bucket.count > WRITE_LIMIT) {
+      const retryAfter = Math.max(1, reset - Math.floor(Date.now() / 1000));
       c.header("Retry-After", retryAfter.toString());
-      logger.warn("Write rate limit exceeded", { 
-        ip, 
+      logger.warn("Write rate limit exceeded", {
+        ip,
         path: c.req.path,
         method: c.req.method,
-        limit: WRITE_LIMIT 
+        limit: WRITE_LIMIT,
       });
       return c.json({ error: "Rate limit exceeded" }, 429);
     }
-    
+
     return next();
   };
 }

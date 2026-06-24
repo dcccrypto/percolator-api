@@ -5,6 +5,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { eventBus, getSupabase, createLogger, sanitizeSlabAddress } from "@percolator/shared";
 import { isClientIpBlocked } from "../middleware/ip-blocklist.js";
 import { isBlockedSlab } from "../middleware/validateSlab.js";
+import { getSharedStore } from "../middleware/shared-store.js";
 
 const logger = createLogger("api:ws");
 
@@ -112,11 +113,6 @@ interface WsClient {
 // Track global subscription count across all clients
 let globalSubscriptionCount = 0;
 
-// Track connections per IP (all connections — used for authenticated budget)
-const connectionsPerIp = new Map<string, number>();
-// Track unauthenticated connections per IP separately (tighter budget)
-const unauthenticatedConnectionsPerIp = new Map<string, number>();
-
 // Auth failure rate limiting per IP (issue #839: connection flood from repeat auth failures)
 // Tracks recent auth failures to temporarily ban repeat offenders.
 const AUTH_FAILURE_WINDOW_MS = 60_000;   // 60-second rolling window
@@ -124,35 +120,22 @@ const AUTH_FAILURE_BAN_THRESHOLD = 10;   // ban after 10 failures in the window
 const AUTH_FAILURE_BAN_DURATION_MS = 300_000; // 5-minute ban
 const MAX_AUTH_FAILURE_ENTRIES = 10_000; // cap to prevent memory exhaustion from distributed attacks
 
-interface AuthFailureRecord {
-  count: number;
-  windowStart: number;  // start of current counting window
-  bannedUntil: number;  // timestamp after which ban is lifted (0 = not banned)
-}
-const authFailuresPerIp = new Map<string, AuthFailureRecord>();
+// Per-IP connection counts are now backed by the SharedStore so they are
+// shared across replicas when Upstash Redis is configured. The store is
+// fetched lazily per-call so module-level initialisation order doesn't matter.
 
 /**
- * Record an auth failure for an IP. Returns true if the IP should now be banned.
+ * Record an auth failure for an IP via the shared store.
  */
-function recordAuthFailure(ip: string): void {
-  const now = Date.now();
-  let rec = authFailuresPerIp.get(ip);
-  if (!rec) {
-    if (authFailuresPerIp.size >= MAX_AUTH_FAILURE_ENTRIES) {
-      const oldestKey = authFailuresPerIp.keys().next().value;
-      if (oldestKey !== undefined) authFailuresPerIp.delete(oldestKey);
-    }
-    rec = { count: 0, windowStart: now, bannedUntil: 0 };
-    authFailuresPerIp.set(ip, rec);
-  }
-  // Reset window if expired
-  if (now - rec.windowStart > AUTH_FAILURE_WINDOW_MS) {
-    rec.count = 0;
-    rec.windowStart = now;
-  }
-  rec.count++;
-  if (rec.count >= AUTH_FAILURE_BAN_THRESHOLD) {
-    rec.bannedUntil = now + AUTH_FAILURE_BAN_DURATION_MS;
+async function recordAuthFailure(ip: string): Promise<void> {
+  const rec = await getSharedStore().recordAuthFailure(
+    ip,
+    AUTH_FAILURE_WINDOW_MS,
+    AUTH_FAILURE_BAN_THRESHOLD,
+    AUTH_FAILURE_BAN_DURATION_MS,
+    MAX_AUTH_FAILURE_ENTRIES
+  );
+  if (rec.bannedUntil > 0 && rec.count >= AUTH_FAILURE_BAN_THRESHOLD) {
     logger.warn("IP temporarily banned for repeated auth failures", {
       ip,
       failures: rec.count,
@@ -164,26 +147,16 @@ function recordAuthFailure(ip: string): void {
 /**
  * Returns true if the IP is currently banned due to too many auth failures.
  */
-function isAuthBanned(ip: string): boolean {
-  const rec = authFailuresPerIp.get(ip);
-  if (!rec || rec.bannedUntil === 0) return false;
-  if (Date.now() >= rec.bannedUntil) {
-    // Ban expired — clear it
-    authFailuresPerIp.delete(ip);
-    return false;
-  }
-  return true;
+async function isAuthBanned(ip: string): Promise<boolean> {
+  return getSharedStore().isAuthBanned(ip);
 }
 
 // Periodically sweep stale auth failure records to prevent unbounded growth
+// (no-op when Redis is active — Redis TTL handles this automatically).
 setInterval(() => {
-  const now = Date.now();
-  for (const [ip, rec] of authFailuresPerIp.entries()) {
-    const stale = rec.bannedUntil > 0
-      ? now >= rec.bannedUntil + AUTH_FAILURE_BAN_DURATION_MS
-      : now - rec.windowStart > AUTH_FAILURE_WINDOW_MS * 2;
-    if (stale) authFailuresPerIp.delete(ip);
-  }
+  getSharedStore()
+    .evictExpiredAuthFailures(AUTH_FAILURE_WINDOW_MS, AUTH_FAILURE_BAN_DURATION_MS)
+    .catch(() => undefined);
 }, AUTH_FAILURE_BAN_DURATION_MS).unref();
 
 // Track connections per slab (for per-slab limits)
@@ -613,7 +586,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
   };
   eventBus.on("funding.updated", fundingUpdatedListener);
 
-  wss.on("connection", (ws, req: IncomingMessage) => {
+  wss.on("connection", async (ws, req: IncomingMessage) => {
     const clientIp = getClientIp(req);
 
     // Reject upgrade if IP cannot be determined (fail-closed)
@@ -631,16 +604,17 @@ export function setupWebSocket(server: Server): WebSocketServer {
       ws.close(1008, "Forbidden");
       return;
     }
-    
+
     // H2: Reject if at max connections
     if (clients.size >= MAX_WS_CONNECTIONS) {
       logger.warn("Max global WS connections reached", { ip: clientIp });
       ws.close(1008, "Connection limit reached");
       return;
     }
-    
+
     // Reject IPs temporarily banned for repeated auth failures (issue #839)
-    if (isAuthBanned(clientIp)) {
+    // isAuthBanned is now async — shared across replicas via SharedStore.
+    if (await isAuthBanned(clientIp)) {
       logger.warn("Rejected connection from auth-banned IP", { ip: clientIp });
       ws.close(1008, "Too many failed attempts — try again later");
       return;
@@ -662,7 +636,11 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
       if (!authenticated) {
         logger.warn("Invalid WS auth token provided", { ip: clientIp });
-        recordAuthFailure(clientIp);
+        // recordAuthFailure is now async — fire-and-forget is fine (ban state
+        // will be set before the next connection attempt from this IP).
+        recordAuthFailure(clientIp).catch((err) =>
+          logger.warn("recordAuthFailure error", { ip: clientIp, error: String(err) })
+        );
       } else if (authenticatedSlab) {
         logger.info("Client authenticated with slab binding", { ip: clientIp, slab: authenticatedSlab });
       }
@@ -671,22 +649,24 @@ export function setupWebSocket(server: Server): WebSocketServer {
     // Per-IP connection limit — differentiated by initial auth state.
     // Unauthenticated clients get a tighter budget (default 3) to limit
     // connection-flood DoS before any auth logic can fire.
-    const ipConnections = connectionsPerIp.get(clientIp) || 0;
+    // Counts are now stored in the SharedStore for cross-replica enforcement.
+    const store = getSharedStore();
+    const ipConnections = await store.getConnectionCount(`auth:${clientIp}`);
     if (authenticated) {
       if (ipConnections >= MAX_CONNECTIONS_PER_IP) {
         logger.warn("Max authenticated connections per IP reached", { ip: clientIp, count: ipConnections });
         ws.close(1008, "Connection limit reached");
         return;
       }
-      connectionsPerIp.set(clientIp, ipConnections + 1);
+      await store.incrementConnectionCount(`auth:${clientIp}`);
     } else {
-      const unauthCount = unauthenticatedConnectionsPerIp.get(clientIp) || 0;
+      const unauthCount = await store.getConnectionCount(`unauth:${clientIp}`);
       if (unauthCount >= MAX_UNAUTHENTICATED_CONNECTIONS_PER_IP) {
         logger.warn("Max unauthenticated connections per IP reached", { ip: clientIp, count: unauthCount });
         ws.close(1008, "Connection limit reached");
         return;
       }
-      unauthenticatedConnectionsPerIp.set(clientIp, unauthCount + 1);
+      await store.incrementConnectionCount(`unauth:${clientIp}`);
     }
 
     // H2: No default "*" subscription — clients must explicitly subscribe
@@ -716,7 +696,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
         if (!client.authenticated) {
           logger.warn("Client failed to authenticate within timeout", { ip: clientIp });
           // Record auth failure for rate limiting (issue #839: flood protection)
-          recordAuthFailure(clientIp);
+          recordAuthFailure(clientIp).catch((err) =>
+            logger.warn("recordAuthFailure error", { ip: clientIp, error: String(err) })
+          );
           if (ws.readyState === WebSocket.OPEN) {
             ws.close(1008, "Authentication required");
           }
@@ -837,7 +819,8 @@ export function setupWebSocket(server: Server): WebSocketServer {
             
             if (!client.initiallyAuthenticated) {
               // Check authenticated connection limit before promoting
-              const ipCount = connectionsPerIp.get(client.ip) || 0;
+              const upgradeStore = getSharedStore();
+              const ipCount = await upgradeStore.getConnectionCount(`auth:${client.ip}`);
               if (ipCount >= MAX_CONNECTIONS_PER_IP) {
                 logger.warn("Auth upgrade rejected — authenticated connection limit reached", {
                   ip: client.ip,
@@ -847,19 +830,14 @@ export function setupWebSocket(server: Server): WebSocketServer {
                 ws.close(1008, "Connection limit reached");
                 return;
               }
-              const unauthCount = unauthenticatedConnectionsPerIp.get(client.ip) || 1;
-              if (unauthCount <= 1) {
-                unauthenticatedConnectionsPerIp.delete(client.ip);
-              } else {
-                unauthenticatedConnectionsPerIp.set(client.ip, unauthCount - 1);
-              }
-              connectionsPerIp.set(client.ip, ipCount + 1);
+              await upgradeStore.decrementConnectionCount(`unauth:${client.ip}`);
+              await upgradeStore.incrementConnectionCount(`auth:${client.ip}`);
               client.initiallyAuthenticated = true;
             }
-            
-            logger.info("Client authenticated via message", { 
-              ip: client.ip, 
-              slab: client.authenticatedSlab 
+
+            logger.info("Client authenticated via message", {
+              ip: client.ip,
+              slab: client.authenticatedSlab,
             });
             safeSend(ws, {
               type: "authenticated",
@@ -868,7 +846,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
           } else {
             logger.warn("Invalid auth token in message", { ip: client.ip });
             // Record auth failure for rate limiting (issue #839)
-            recordAuthFailure(client.ip);
+            recordAuthFailure(client.ip).catch((err) =>
+              logger.warn("recordAuthFailure error", { ip: client.ip, error: String(err) })
+            );
             safeSend(ws, { type: "error", message: "Invalid authentication token" });
           }
           return;
@@ -1153,21 +1133,17 @@ export function setupWebSocket(server: Server): WebSocketServer {
         clearTimeout(client.authTimeout);
       }
       
-      // Decrement the correct per-IP counter based on initial auth state
+      // Decrement the correct per-IP counter based on initial auth state.
+      // Uses the shared store so the count stays accurate across replicas.
+      const closeStore = getSharedStore();
       if (client.initiallyAuthenticated) {
-        const ipCount = connectionsPerIp.get(client.ip) || 1;
-        if (ipCount <= 1) {
-          connectionsPerIp.delete(client.ip);
-        } else {
-          connectionsPerIp.set(client.ip, ipCount - 1);
-        }
+        closeStore.decrementConnectionCount(`auth:${client.ip}`).catch((err) =>
+          logger.warn("decrementConnectionCount error on close", { ip: client.ip, error: String(err) })
+        );
       } else {
-        const unauthCount = unauthenticatedConnectionsPerIp.get(client.ip) || 1;
-        if (unauthCount <= 1) {
-          unauthenticatedConnectionsPerIp.delete(client.ip);
-        } else {
-          unauthenticatedConnectionsPerIp.set(client.ip, unauthCount - 1);
-        }
+        closeStore.decrementConnectionCount(`unauth:${client.ip}`).catch((err) =>
+          logger.warn("decrementConnectionCount error on close", { ip: client.ip, error: String(err) })
+        );
       }
       
       // Remove from slab tracking
