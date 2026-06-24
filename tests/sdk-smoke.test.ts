@@ -330,7 +330,7 @@ describe("@percolatorct/sdk v17 — removed instruction guards", () => {
     // + its own ranking logic. This test documents the v17 behavior.
     expect(() =>
       buildAdlInstruction(DUMMY_KEY, DUMMY_KEY, DUMMY_KEY, DUMMY_KEY, 0)
-    ).toThrow("not in v17");
+    ).toThrow("ExecuteAdl transaction building is not supported");
   });
 
   it("encodePermissionlessCrank is a function and hardcodes fundingRateE9=0n on-wire", () => {
