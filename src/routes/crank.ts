@@ -34,7 +34,7 @@ export function crankStatusRoutes(): Hono {
       return result;
     }
 
-    return c.json({ markets: result.data });
+    return c.json({ markets: result.data, stale: result.stale });
   });
 
   return app;

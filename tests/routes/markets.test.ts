@@ -365,4 +365,75 @@ describe("markets routes", () => {
       expect(data.error).toBe("Market not found");
     });
   });
+
+  describe("DB cache fallback — stale flag in response body (BUG-003)", () => {
+    it("surfaces stale:true in the JSON body on /markets when serving cached data after a DB failure", async () => {
+      const mockMarketsWithStats = [
+        {
+          slab_address: "11111111111111111111111111111111",
+          mint_address: "TokenMint111111111111111111111111",
+          symbol: "BTC-PERP",
+          name: "Bitcoin Perpetual",
+          decimals: 9,
+          deployer: "Deployer11111111111111111111111111",
+          oracle_authority: "Oracle111111111111111111111111111",
+          initial_price_e6: 50000000000,
+          max_leverage: 10,
+          trading_fee_bps: 5,
+          lp_collateral: "1000000000",
+          matcher_context: null,
+          status: "active",
+          logo_url: null,
+          created_at: "2025-01-01T00:00:00Z",
+          updated_at: "2025-01-01T00:00:00Z",
+          total_open_interest: "5000000000",
+          total_accounts: 100,
+          last_crank_slot: 123456789,
+          last_price: 50000,
+          mark_price: 50000,
+          index_price: 50000,
+          funding_rate: 5,
+          net_lp_pos: "1000000",
+        },
+      ];
+
+      let call = 0;
+      mockSupabase.from.mockImplementation((table: string) => {
+        if (table === "markets_with_stats") {
+          const chainable: any = {
+            eq: vi.fn().mockReturnThis(),
+            not: vi.fn(() => {
+              call++;
+              return call === 1
+                ? Promise.resolve({ data: mockMarketsWithStats, error: null })
+                : Promise.resolve({ data: null, error: new Error("DB down") });
+            }),
+          };
+          return { select: vi.fn(() => chainable) };
+        }
+        return mockSupabase;
+      });
+
+      const app = marketRoutes();
+
+      // First request succeeds and seeds the DB-fallback cache.
+      const seedRes = await app.request("/markets");
+      expect(seedRes.status).toBe(200);
+      const seedBody = await seedRes.json();
+      expect(seedBody.stale).toBe(false);
+      expect(seedBody.markets).toHaveLength(1);
+
+      // Second request: the query fails, so withDbCacheFallback serves the
+      // cached entry. Before the fix, stale was set on headers only and
+      // silently dropped from the JSON body — a client that only reads the
+      // body (e.g. a bot or keeper) had no way to know the data was stale.
+      const res = await app.request("/markets");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-Cache-Status")).toBe("stale-fallback");
+      const body = await res.json();
+      expect(body.stale).toBe(true);
+      expect(body.markets).toHaveLength(1);
+      expect(body.markets[0].slabAddress).toBe("11111111111111111111111111111111");
+    });
+  });
 });

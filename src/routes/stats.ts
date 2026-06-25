@@ -103,7 +103,7 @@ export function statsRoutes(): Hono {
       return result;
     }
 
-    return c.json(result.data);
+    return c.json({ ...result.data, stale: result.stale });
   });
 
   return app;

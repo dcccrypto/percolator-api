@@ -109,7 +109,7 @@ export function fundingRoutes(): Hono {
     // already set on the context by the middleware.
     if (result instanceof Response) return result;
 
-    return c.json(result.data);
+    return c.json({ ...result.data, stale: result.stale });
   });
 
   /**

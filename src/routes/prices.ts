@@ -45,7 +45,7 @@ export function priceRoutes(): Hono {
       return result;
     }
 
-    return c.json({ markets: result.data });
+    return c.json({ markets: result.data, stale: result.stale });
   });
 
   app.get("/prices/:slab", validateSlab, async (c) => {

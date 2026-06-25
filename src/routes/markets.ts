@@ -86,7 +86,7 @@ export function marketRoutes(): Hono {
       return result;
     }
 
-    return c.json({ markets: result.data });
+    return c.json({ markets: result.data, stale: result.stale });
   });
 
   // GET /markets/stats — all market stats from DB (filtered by network)
@@ -109,7 +109,7 @@ export function marketRoutes(): Hono {
       return result;
     }
 
-    return c.json({ stats: result.data });
+    return c.json({ stats: result.data, stale: result.stale });
   });
 
   // GET /markets/:slab/stats — single market stats from DB
