@@ -202,7 +202,7 @@ const metrics: Metrics = {
 };
 
 /**
- * Safely send a JSON-serializable payload to a WebSocket client.
+ * Guarded send of an already-serialized payload to a WebSocket client.
  *
  * The async message handler runs concurrently per message and contains
  * `await`s, so the underlying socket can transition out of OPEN between
@@ -215,24 +215,33 @@ const metrics: Metrics = {
  *   2. Honour `bufferedAmount <= MAX_BUFFER_BYTES` for backpressure.
  *   3. Catch any residual TOCTOU race where the socket closes between
  *      the check and the send call itself, logging it as debug rather
- *      than letting the error escape the handler.
+ *      than letting the error escape the caller — critically, this must
+ *      be per-client: broadcast loops fan one message out to many clients,
+ *      and one client's send throwing must not abort the rest of the loop.
  *
  * On a successful send, metrics are bumped so observability stays
  * accurate without callers having to remember to do it themselves.
+ *
+ * Takes a pre-serialized string so broadcast loops that fan the same
+ * message out to many clients only pay the JSON.stringify cost once.
  */
-function safeSend(ws: WebSocket, payload: unknown): void {
+function sendSerialized(ws: WebSocket, serialized: string): void {
   if (ws.readyState !== WebSocket.OPEN) return;
   if (ws.bufferedAmount > MAX_BUFFER_BYTES) return;
-  const serialized = JSON.stringify(payload);
   try {
     ws.send(serialized);
     metrics.messagesSent++;
     metrics.bytesSent += serialized.length;
   } catch (err) {
-    logger.debug("safeSend dropped after socket transitioned out of OPEN", {
+    logger.debug("sendSerialized dropped after socket transitioned out of OPEN", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/** Safely send a JSON-serializable payload to a single WebSocket client. */
+function safeSend(ws: WebSocket, payload: unknown): void {
+  sendSerialized(ws, JSON.stringify(payload));
 }
 
 // Reset rate metrics every minute for messages/sec and bytes/sec
@@ -434,14 +443,8 @@ function flushPriceUpdate(slabAddress: string): void {
     });
     
     for (const client of slabClients) {
-      if (
-        client.ws.readyState === WebSocket.OPEN &&
-        client.subscriptions.has(channel)
-      ) {
-        if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
-        client.ws.send(msg);
-        metrics.messagesSent++;
-        metrics.bytesSent += msg.length;
+      if (client.subscriptions.has(channel)) {
+        sendSerialized(client.ws, msg);
       }
     }
   } catch (err) {
@@ -537,14 +540,8 @@ export function setupWebSocket(server: Server): WebSocketServer {
       });
 
       for (const client of slabClients) {
-        if (
-          client.ws.readyState === WebSocket.OPEN &&
-          client.subscriptions.has(channel)
-        ) {
-          if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
-          client.ws.send(msg);
-          metrics.messagesSent++;
-          metrics.bytesSent += msg.length;
+        if (client.subscriptions.has(channel)) {
+          sendSerialized(client.ws, msg);
         }
       }
     } catch (err) {
@@ -570,14 +567,8 @@ export function setupWebSocket(server: Server): WebSocketServer {
       });
 
       for (const client of slabClients) {
-        if (
-          client.ws.readyState === WebSocket.OPEN &&
-          client.subscriptions.has(channel)
-        ) {
-          if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
-          client.ws.send(msg);
-          metrics.messagesSent++;
-          metrics.bytesSent += msg.length;
+        if (client.subscriptions.has(channel)) {
+          sendSerialized(client.ws, msg);
         }
       }
     } catch (err) {
