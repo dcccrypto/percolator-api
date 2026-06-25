@@ -54,6 +54,8 @@ import {
 import { withRpcFallback } from "../utils/rpc-fallback.js";
 import { RpcTimeoutError } from "../utils/rpc-timeout.js";
 import { isBlockedSlab } from "../middleware/validateSlab.js";
+import { getClientIp } from "../middleware/rate-limit.js";
+import { getSharedStore } from "../middleware/shared-store.js";
 
 const logger = createLogger("api:adl");
 
@@ -61,6 +63,26 @@ const logger = createLogger("api:adl");
 const ADL_CACHE_TTL_MS = 15_000; // 15 seconds
 const ADL_CACHE_MAX_ENTRIES = 100;
 const adlCache = new Map<string, { data: any; fetchedAt: number }>();
+
+// ─── per-IP RPC-fetch throttle ──────────────────────────────────────────────
+// The cache above only de-dupes repeated lookups of the SAME slab. It does
+// nothing to stop a caller from cycling through many distinct slab values
+// (real or syntactically-valid-but-nonexistent) to force a fresh fetchSlab
+// RPC call per request. This throttle counts only cache-miss-triggering
+// fetches per IP, so normal polling of a handful of real markets within the
+// cache TTL is unaffected, while distinct-slab cycling is capped.
+const ADL_RPC_FETCH_WINDOW_MS = 60_000; // 1 minute
+const ADL_RPC_FETCH_MAX_ENTRIES = 50_000; // same OOM-safety cap as rate-limit.ts
+const ADL_RPC_FETCH_LIMIT = (() => {
+  const parsed = Number(process.env.ADL_RPC_FETCH_LIMIT_PER_MIN ?? "20");
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    logger.warn("Invalid ADL_RPC_FETCH_LIMIT_PER_MIN, using default 20", {
+      value: process.env.ADL_RPC_FETCH_LIMIT_PER_MIN,
+    });
+    return 20;
+  }
+  return parsed;
+})();
 
 /** @internal Reset cache — used by tests to ensure isolation */
 export function __resetAdlCache(): void {
@@ -198,6 +220,25 @@ export function adlRoutes(): Hono {
 
     if (isBlockedSlab(slab)) {
       return c.json({ error: "Market not found" }, 404);
+    }
+
+    // Throttle cache-miss-triggering RPC fetches per IP. This is what actually
+    // bounds RPC-cost amplification from cycling distinct slab values; the
+    // generic global rate limiter alone does not, since each distinct slab is
+    // a fresh cache miss regardless of how many total requests remain in budget.
+    const ip = getClientIp(c);
+    if (ip) {
+      const bucket = await getSharedStore().incrementRateBucket(
+        `adl-rpc-fetch:${ip}`,
+        ADL_RPC_FETCH_WINDOW_MS,
+        ADL_RPC_FETCH_MAX_ENTRIES
+      );
+      if (bucket.count > ADL_RPC_FETCH_LIMIT) {
+        const retryAfter = Math.max(1, Math.floor((bucket.resetAt - Date.now()) / 1000));
+        c.header("Retry-After", retryAfter.toString());
+        logger.warn("ADL RPC-fetch throttle exceeded", { ip, slab, limit: ADL_RPC_FETCH_LIMIT });
+        return c.json({ error: "Too many distinct market lookups — try again shortly" }, 429);
+      }
     }
 
     let data: Uint8Array;

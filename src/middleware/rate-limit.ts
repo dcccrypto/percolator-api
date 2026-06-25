@@ -42,7 +42,7 @@ function normalizeIp(ip: string): string {
   return ip;
 }
 
-function getClientIp(c: Context): string | null {
+export function getClientIp(c: Context): string | null {
   if (PROXY_DEPTH === 0) {
     // No trusted proxy: ignore all forwarded headers, use socket address.
     // x-real-ip is client-spoofable and must not be trusted without a proxy.

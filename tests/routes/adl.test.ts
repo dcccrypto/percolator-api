@@ -2,7 +2,9 @@
  * Tests for ADL rankings route — PERC-8293 (T11)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Keypair } from "@solana/web3.js";
 import { adlRoutes, __resetAdlCache } from "../../src/routes/adl.js";
+import { resetSharedStore, InMemoryStore } from "../../src/middleware/shared-store.js";
 
 // ── mocks ──────────────────────────────────────────────────────────────────
 
@@ -55,10 +57,14 @@ function makeConfig(overrides: Partial<Record<string, unknown>> = {}): Record<st
   };
 }
 
-async function makeRequest(queryString: string) {
+async function makeRequest(queryString: string, headers: Record<string, string> = {}) {
   const app = adlRoutes();
-  const req = new Request(`http://localhost/api/adl/rankings${queryString}`);
+  const req = new Request(`http://localhost/api/adl/rankings${queryString}`, { headers });
   return app.fetch(req);
+}
+
+function distinctValidSlabs(n: number): string[] {
+  return Array.from({ length: n }, () => Keypair.generate().publicKey.toBase58());
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────
@@ -271,5 +277,54 @@ describe("GET /api/adl/rankings", () => {
     for (const field of requiredFields) {
       expect(body).toHaveProperty(field);
     }
+  });
+
+  describe("per-IP RPC-fetch throttle (BUG-001)", () => {
+    beforeEach(() => {
+      resetSharedStore(new InMemoryStore());
+    });
+
+    it("returns 429 after exceeding the distinct-slab fetch limit for one IP", async () => {
+      const ip = "203.0.113.50";
+      const slabs = distinctValidSlabs(21); // default limit is 20/min
+      let lastRes;
+      for (const slab of slabs) {
+        lastRes = await makeRequest(`?slab=${slab}`, { "x-forwarded-for": ip });
+      }
+      expect(lastRes!.status).toBe(429);
+      const body = await lastRes!.json();
+      expect(body.error).toMatch(/too many/i);
+    });
+
+    it("does not count cache hits toward the throttle", async () => {
+      const ip = "203.0.113.51";
+      // Repeated requests for the SAME slab should be cache hits after the
+      // first and never trip the distinct-slab throttle, even past its limit.
+      for (let i = 0; i < 30; i++) {
+        const res = await makeRequest(`?slab=${VALID_SLAB}`, { "x-forwarded-for": ip });
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it("tracks separate throttle buckets per IP", async () => {
+      const slabsA = distinctValidSlabs(20);
+      const slabsB = distinctValidSlabs(20);
+      for (const slab of slabsA) {
+        const res = await makeRequest(`?slab=${slab}`, { "x-forwarded-for": "203.0.113.60" });
+        expect(res.status).not.toBe(429);
+      }
+      for (const slab of slabsB) {
+        const res = await makeRequest(`?slab=${slab}`, { "x-forwarded-for": "203.0.113.61" });
+        expect(res.status).not.toBe(429);
+      }
+    });
+
+    it("does not throttle when client IP cannot be determined", async () => {
+      // No x-forwarded-for header and no real socket in the test harness —
+      // getClientIp() returns null, so the route falls through unthrottled
+      // (the global app-level rate limiter is the authoritative IP gate).
+      const res = await makeRequest(`?slab=${VALID_SLAB}`);
+      expect(res.status).toBe(200);
+    });
   });
 });
