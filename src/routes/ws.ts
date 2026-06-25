@@ -110,8 +110,13 @@ interface WsClient {
   msgWindowStart: number; // Start of current rate-limit window
 }
 
-// Track global subscription count across all clients
-let globalSubscriptionCount = 0;
+// Global connection/subscription caps are enforced via the SharedStore (same
+// backend as the per-IP counters below) so the limits hold across replicas
+// under horizontal scaling. Without this, MAX_WS_CONNECTIONS/
+// MAX_GLOBAL_SUBSCRIPTIONS are each enforced independently per replica — the
+// true fleet-wide cap becomes N×limit instead of limit, for N replicas.
+const GLOBAL_CONN_KEY = "ws:global-connections";
+const GLOBAL_SUB_KEY = "ws:global-subscriptions";
 
 // Auth failure rate limiting per IP (issue #839: connection flood from repeat auth failures)
 // Tracks recent auth failures to temporarily ban repeat offenders.
@@ -450,19 +455,34 @@ function flushPriceUpdate(slabAddress: string): void {
 }
 
 /**
- * Get WebSocket metrics for /ws/stats endpoint
+ * Get WebSocket metrics for /ws/stats endpoint.
+ *
+ * totalConnections and totalSubscriptions are read from the SharedStore and
+ * reflect the true fleet-wide total across all replicas (see GLOBAL_CONN_KEY/
+ * GLOBAL_SUB_KEY). connectionsPerSlab, messagesPerSec, and bytesPerSec remain
+ * local to this replica — they're inherently per-process observability data
+ * (this replica's own observed traffic/distribution), not safety caps, so
+ * aggregating them across replicas is a different and much larger problem
+ * than fixing the cap-enforcement bug this fixes; left out of scope.
  */
-export function getWebSocketMetrics(): any {
+export async function getWebSocketMetrics(): Promise<any> {
   const now = Date.now();
   const elapsedSec = (now - metrics.lastResetTime) / 1000 || 1;
+  const store = getSharedStore();
+  const [totalConnections, totalSubscriptions] = await Promise.all([
+    store.getConnectionCount(GLOBAL_CONN_KEY),
+    store.getConnectionCount(GLOBAL_SUB_KEY),
+  ]);
 
   return {
-    totalConnections: metrics.totalConnections,
+    totalConnections,
+    totalSubscriptions,
     connectionsPerSlab: Object.fromEntries(metrics.connectionsPerSlab),
     messagesPerSec: parseFloat((metrics.messagesReceived / elapsedSec).toFixed(2)),
     bytesPerSec: parseInt((metrics.bytesSent / elapsedSec).toFixed(0), 10),
     limits: {
       maxGlobalConnections: MAX_WS_CONNECTIONS,
+      maxGlobalSubscriptions: MAX_GLOBAL_SUBSCRIPTIONS,
       maxConnectionsPerSlab: MAX_CONNECTIONS_PER_SLAB,
       maxConnectionsPerIp: MAX_CONNECTIONS_PER_IP,
       maxUnauthConnectionsPerIp: MAX_UNAUTHENTICATED_CONNECTIONS_PER_IP,
@@ -605,9 +625,10 @@ export function setupWebSocket(server: Server): WebSocketServer {
       return;
     }
 
-    // H2: Reject if at max connections
-    if (clients.size >= MAX_WS_CONNECTIONS) {
-      logger.warn("Max global WS connections reached", { ip: clientIp });
+    // H2: Reject if at max connections (global across all replicas, via SharedStore)
+    const globalConnCount = await getSharedStore().getConnectionCount(GLOBAL_CONN_KEY);
+    if (globalConnCount >= MAX_WS_CONNECTIONS) {
+      logger.warn("Max global WS connections reached", { ip: clientIp, count: globalConnCount });
       ws.close(1008, "Connection limit reached");
       return;
     }
@@ -683,8 +704,9 @@ export function setupWebSocket(server: Server): WebSocketServer {
     };
     clients.add(client);
     metrics.totalConnections = clients.size;
-    
-    logger.info("WebSocket connection established", { 
+    await getSharedStore().incrementConnectionCount(GLOBAL_CONN_KEY);
+
+    logger.info("WebSocket connection established", {
       ip: clientIp, 
       authenticated,
       totalClients: clients.size 
@@ -870,7 +892,19 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
           const subscribed: string[] = [];
           const errors: string[] = [];
-          
+
+          // Check the global subscription cap once per message (not once
+          // per channel) and track local accepted-count as a delta, then
+          // flush a single batched update after the loop. This avoids up to
+          // MAX_CHANNELS_PER_MESSAGE (50) shared-store round-trips per
+          // message. The existing per-IP caps in this file are already
+          // non-atomic check-then-act, so the small intra-message overshoot
+          // window this introduces (bounded by MAX_CHANNELS_PER_MESSAGE) is
+          // not a new class of weaker guarantee.
+          const subStore = getSharedStore();
+          const globalSubsAtStart = await subStore.getConnectionCount(GLOBAL_SUB_KEY);
+          let newSubsThisMessage = 0;
+
           for (const channel of msg.channels) {
             if (typeof channel !== "string") continue;
             const safeChannel = channel.slice(0, 100);
@@ -917,31 +951,37 @@ export function setupWebSocket(server: Server): WebSocketServer {
               continue;
             }
             
-            // Cap global subscriptions to prevent DoS
-            if (globalSubscriptionCount >= MAX_GLOBAL_SUBSCRIPTIONS) {
+            // Cap global subscriptions to prevent DoS (checked against the
+            // count as of this message's start plus any accepted so far in
+            // this same loop — see comment above the loop).
+            if (globalSubsAtStart + newSubsThisMessage >= MAX_GLOBAL_SUBSCRIPTIONS) {
               errors.push("Server subscription limit reached");
               break;
             }
-            
+
             // Cap subscriptions per client
             if (client.subscriptions.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) {
               errors.push("Subscription limit per connection reached");
               break;
             }
-            
+
             // Check per-slab connection limit
             const slabClients = connectionsPerSlab.get(sanitized);
             if (slabClients && slabClients.size >= MAX_CONNECTIONS_PER_SLAB) {
               errors.push("Connection limit for this market reached");
               continue;
             }
-            
+
             client.subscriptions.add(fullChannel);
-            globalSubscriptionCount++;
+            newSubsThisMessage++;
             addClientToSlab(client, sanitized);
             subscribed.push(fullChannel);
           }
-          
+
+          if (newSubsThisMessage > 0) {
+            await subStore.addConnectionCount(GLOBAL_SUB_KEY, newSubsThisMessage);
+          }
+
           if (subscribed.length > 0) {
             safeSend(ws, { type: "subscribed", channels: subscribed });
             
@@ -1043,15 +1083,25 @@ export function setupWebSocket(server: Server): WebSocketServer {
             message: "Please use channels array. Subscribing to all channels for this slab.",
           });
           
+          // Same batched cap-check pattern as the modern subscribe path
+          // above (at most 3 channels here, but kept consistent).
+          const legacySubStore = getSharedStore();
+          const legacyGlobalSubsAtStart = await legacySubStore.getConnectionCount(GLOBAL_SUB_KEY);
+          let legacyNewSubs = 0;
+
           const subscribed: string[] = [];
           for (const channel of channels) {
             if (client.subscriptions.has(channel)) continue;
-            if (globalSubscriptionCount >= MAX_GLOBAL_SUBSCRIPTIONS) break;
+            if (legacyGlobalSubsAtStart + legacyNewSubs >= MAX_GLOBAL_SUBSCRIPTIONS) break;
             if (client.subscriptions.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) break;
 
             client.subscriptions.add(channel);
-            globalSubscriptionCount++;
+            legacyNewSubs++;
             subscribed.push(channel);
+          }
+
+          if (legacyNewSubs > 0) {
+            await legacySubStore.addConnectionCount(GLOBAL_SUB_KEY, legacyNewSubs);
           }
 
           if (subscribed.length > 0) {
@@ -1070,12 +1120,13 @@ export function setupWebSocket(server: Server): WebSocketServer {
           }
 
           const unsubscribed: string[] = [];
-          
+          let removedSubs = 0;
+
           for (const channel of msg.channels) {
             if (client.subscriptions.delete(channel)) {
-              globalSubscriptionCount--;
+              removedSubs++;
               unsubscribed.push(channel);
-              
+
               // Extract slab and remove from slab tracking if no more subs for this slab
               const slab = extractSlabFromChannel(channel);
               if (slab) {
@@ -1088,7 +1139,11 @@ export function setupWebSocket(server: Server): WebSocketServer {
               }
             }
           }
-          
+
+          if (removedSubs > 0) {
+            await getSharedStore().addConnectionCount(GLOBAL_SUB_KEY, -removedSubs);
+          }
+
           if (unsubscribed.length > 0) {
             safeSend(ws, { type: "unsubscribed", channels: unsubscribed });
           }
@@ -1099,14 +1154,19 @@ export function setupWebSocket(server: Server): WebSocketServer {
           if (sanitized) {
             const channels = [`price:${sanitized}`, `trades:${sanitized}`, `funding:${sanitized}`];
             const unsubscribed: string[] = [];
-            
+            let legacyRemovedSubs = 0;
+
             for (const channel of channels) {
               if (client.subscriptions.delete(channel)) {
-                globalSubscriptionCount--;
+                legacyRemovedSubs++;
                 unsubscribed.push(channel);
               }
             }
-            
+
+            if (legacyRemovedSubs > 0) {
+              await getSharedStore().addConnectionCount(GLOBAL_SUB_KEY, -legacyRemovedSubs);
+            }
+
             removeClientFromSlab(client, sanitized);
             safeSend(ws, { type: "unsubscribed", slabAddress: sanitized, channels: unsubscribed });
           }
@@ -1153,8 +1213,18 @@ export function setupWebSocket(server: Server): WebSocketServer {
       }
       
       // H2: O(1) removal with Set
-      // Decrement global subscription count for all client subscriptions
-      globalSubscriptionCount = Math.max(0, globalSubscriptionCount - client.subscriptions.size);
+      // Decrement global subscription + connection counts via the shared
+      // store (fire-and-forget — this handler is synchronous, matching the
+      // per-IP decrement pattern above).
+      const subsToRelease = client.subscriptions.size;
+      if (subsToRelease > 0) {
+        closeStore.addConnectionCount(GLOBAL_SUB_KEY, -subsToRelease).catch((err) =>
+          logger.warn("addConnectionCount error on close (subscriptions)", { ip: client.ip, error: String(err) })
+        );
+      }
+      closeStore.decrementConnectionCount(GLOBAL_CONN_KEY).catch((err) =>
+        logger.warn("decrementConnectionCount error on close (global connections)", { ip: client.ip, error: String(err) })
+      );
       clients.delete(client);
       metrics.totalConnections = clients.size;
       

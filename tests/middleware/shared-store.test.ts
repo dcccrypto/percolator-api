@@ -110,6 +110,41 @@ describe("InMemoryStore — connection counts", () => {
 });
 
 // ---------------------------------------------------------------------------
+// InMemoryStore — addConnectionCount (batched delta, BUG-005)
+// ---------------------------------------------------------------------------
+
+describe("InMemoryStore — addConnectionCount", () => {
+  it("adds a positive delta in one call", async () => {
+    const store = new InMemoryStore();
+    await store.addConnectionCount("ws:global-subscriptions", 5);
+    expect(await store.getConnectionCount("ws:global-subscriptions")).toBe(5);
+  });
+
+  it("adds a negative delta to release a batch", async () => {
+    const store = new InMemoryStore();
+    await store.addConnectionCount("ws:global-subscriptions", 5);
+    await store.addConnectionCount("ws:global-subscriptions", -3);
+    expect(await store.getConnectionCount("ws:global-subscriptions")).toBe(2);
+  });
+
+  it("floors at 0 and removes the key rather than going negative", async () => {
+    const store = new InMemoryStore();
+    await store.addConnectionCount("ws:global-subscriptions", 2);
+    await store.addConnectionCount("ws:global-subscriptions", -10);
+    expect(await store.getConnectionCount("ws:global-subscriptions")).toBe(0);
+  });
+
+  it("is interoperable with incrementConnectionCount/decrementConnectionCount on the same key", async () => {
+    const store = new InMemoryStore();
+    await store.incrementConnectionCount("ws:global-connections");
+    await store.addConnectionCount("ws:global-connections", 4);
+    expect(await store.getConnectionCount("ws:global-connections")).toBe(5);
+    await store.decrementConnectionCount("ws:global-connections");
+    expect(await store.getConnectionCount("ws:global-connections")).toBe(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // InMemoryStore — auth failure ban tests
 // ---------------------------------------------------------------------------
 
@@ -229,6 +264,16 @@ describe("UpstashStore — graceful fallback", () => {
     const count = await store.getConnectionCount("auth:1.2.3.4");
     // Falls back to in-memory which has 0 (separate fallback instance from increment)
     expect(typeof count).toBe("number");
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it("falls back gracefully for addConnectionCount", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network unreachable"));
+
+    const store = new UpstashStore("https://test.upstash.io", "token");
+    await expect(store.addConnectionCount("ws:global-subscriptions", 5)).resolves.toBeUndefined();
 
     globalThis.fetch = originalFetch;
   });

@@ -86,6 +86,15 @@ export interface SharedStore {
   decrementConnectionCount(key: string): Promise<void>;
 
   /**
+   * Atomically add `delta` (positive or negative) to the counter for `key`.
+   * For batch updates where calling increment/decrement N times would cost
+   * N round-trips under Upstash (e.g. N subscriptions acquired/released in
+   * one WebSocket message). Floors at 0 and deletes the key, same as
+   * decrementConnectionCount.
+   */
+  addConnectionCount(key: string, delta: number): Promise<void>;
+
+  /**
    * Record an auth failure for an IP.
    * Returns the updated record so callers can decide whether to ban.
    */
@@ -186,6 +195,15 @@ export class InMemoryStore implements SharedStore {
       this.connCounts.delete(key);
     } else {
       this.connCounts.set(key, cur - 1);
+    }
+  }
+
+  async addConnectionCount(key: string, delta: number): Promise<void> {
+    const next = (this.connCounts.get(key) ?? 0) + delta;
+    if (next <= 0) {
+      this.connCounts.delete(key);
+    } else {
+      this.connCounts.set(key, next);
     }
   }
 
@@ -413,6 +431,29 @@ export class UpstashStore implements SharedStore {
         error: err instanceof Error ? err.message : String(err),
       });
       await this.fallback.decrementConnectionCount(ip);
+    }
+  }
+
+  async addConnectionCount(key: string, delta: number): Promise<void> {
+    try {
+      // Same 24h safety-net TTL as increment/decrementConnectionCount.
+      const script = `
+        local val = redis.call("INCRBY", KEYS[1], ARGV[1])
+        if val <= 0 then
+          redis.call("DEL", KEYS[1])
+        else
+          redis.call("EXPIRE", KEYS[1], 86400)
+        end
+        return val
+      `;
+      await this.eval(script, [this.connKey(key)], [delta]);
+    } catch (err) {
+      logger.warn("UpstashStore.addConnectionCount failed, using fallback", {
+        key,
+        delta,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.fallback.addConnectionCount(key, delta);
     }
   }
 

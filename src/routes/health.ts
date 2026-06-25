@@ -56,7 +56,7 @@ export function healthRoutes(): Hono {
     
     // Check WebSocket subsystem — saturated WS means new clients can't connect
     try {
-      const wsMetrics = getWebSocketMetrics();
+      const wsMetrics = await getWebSocketMetrics();
       const utilization = wsMetrics.totalConnections / wsMetrics.limits.maxGlobalConnections;
       checks.ws = utilization < 0.95; // degraded if >95% of connection slots used
     } catch {
@@ -83,7 +83,7 @@ export function healthRoutes(): Hono {
   
   app.get("/ws/stats", requireApiKey(), async (c) => {
     try {
-      const metrics = getWebSocketMetrics();
+      const metrics = await getWebSocketMetrics();
       return c.json(metrics);
     } catch (err) {
       logger.error("Failed to get WebSocket metrics", { error: truncateErrorMessage(err instanceof Error ? err.message : err, 120) });
