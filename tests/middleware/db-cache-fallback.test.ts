@@ -9,9 +9,11 @@ vi.mock("@percolator/shared", () => ({
     debug: vi.fn(),
   })),
   truncateErrorMessage: vi.fn((s: string) => s),
+  getNetwork: vi.fn(() => "devnet"),
 }));
 
 import { withDbCacheFallback, clearDbCache } from "../../src/middleware/db-cache-fallback.js";
+const { getNetwork } = await import("@percolator/shared");
 
 function makeApp(handler: (c: any) => Promise<Response>) {
   const app = new Hono();
@@ -22,6 +24,7 @@ function makeApp(handler: (c: any) => Promise<Response>) {
 describe("withDbCacheFallback", () => {
   beforeEach(() => {
     clearDbCache();
+    vi.mocked(getNetwork).mockReturnValue("devnet" as any);
   });
 
   it("returns DbCacheResult on success with stale=false and ok=true", async () => {
@@ -97,5 +100,42 @@ describe("withDbCacheFallback", () => {
     // Headers set by the middleware persist on the context and reach the client.
     expect(res.headers.get("X-Cache-Status")).toBe("stale-fallback");
     expect(res.headers.get("Warning")).toMatch(/^110 - "Response is Stale/);
+  });
+
+  it("does not serve a different network's stale cache after the configured network changes (BUG-006)", async () => {
+    // Seed the cache while serving devnet.
+    vi.mocked(getNetwork).mockReturnValue("devnet" as any);
+    const seedApp = makeApp(async (c) => {
+      const result = await withDbCacheFallback(
+        "test:network-switch",
+        async () => ({ network: "devnet-data" }),
+        c,
+      );
+      if (result instanceof Response) return result;
+      return c.json(result.data);
+    });
+    const seed = await seedApp.request("/test");
+    expect(seed.status).toBe(200);
+
+    // Simulate the deployment's configured network changing (e.g. redeploy/
+    // config flip) while the live query for the SAME bare cacheKey fails.
+    vi.mocked(getNetwork).mockReturnValue("mainnet" as any);
+    const fallbackApp = makeApp(async (c) => {
+      const result = await withDbCacheFallback(
+        "test:network-switch",
+        async () => {
+          throw new Error("DB down");
+        },
+        c,
+      );
+      if (result instanceof Response) return result;
+      return c.json(result.data);
+    });
+
+    const res = await fallbackApp.request("/test");
+    // Must NOT silently serve devnet's stale data under the mainnet
+    // context — there is no mainnet-keyed cache entry, so this must be a
+    // clean 503, not a 200 carrying the wrong network's data.
+    expect(res.status).toBe(503);
   });
 });

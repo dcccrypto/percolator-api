@@ -4,7 +4,7 @@
  * When Supabase queries fail, serve stale cached data instead of 500 errors.
  * This improves availability during DB outages or network issues.
  */
-import { createLogger, truncateErrorMessage } from "@percolator/shared";
+import { createLogger, truncateErrorMessage, getNetwork } from "@percolator/shared";
 import { Context } from "hono";
 
 const logger = createLogger("api:db-cache-fallback");
@@ -53,10 +53,17 @@ export async function withDbCacheFallback<T>(
   queryFn: () => Promise<T>,
   c: Context
 ): Promise<DbCacheResult<T> | Response> {
+  // Suffix with the active network so this fallback cache can never serve a
+  // different network's data than the live query it's backing — every live
+  // query already filters by network at the DB layer, but the bare cacheKey
+  // strings callers pass in (e.g. "markets:all") carry no network dimension
+  // on their own.
+  const networkedKey = `${cacheKey}:${getNetwork()}`;
+
   try {
     // Try the query
     const result = await queryFn();
-    
+
     // Evict oldest entries when at capacity
     while (dbCache.size >= MAX_DB_CACHE_ENTRIES) {
       const oldest = dbCache.keys().next().value;
@@ -65,7 +72,7 @@ export async function withDbCacheFallback<T>(
     }
 
     // Cache successful result
-    dbCache.set(cacheKey, {
+    dbCache.set(networkedKey, {
       data: result,
       timestamp: Date.now(),
     });
@@ -76,9 +83,9 @@ export async function withDbCacheFallback<T>(
       error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120),
       cacheKey,
     });
-    
+
     // Check if we have cached data
-    const cached = dbCache.get(cacheKey);
+    const cached = dbCache.get(networkedKey);
     
     if (cached) {
       const age = Date.now() - cached.timestamp;
