@@ -97,7 +97,7 @@ describe("GET /candles/:slab", () => {
 
   it("returns no_data when trades table is empty", async () => {
     const app = candleRoutes();
-    const res = await app.request(`/candles/${SLAB}?resolution=1&from=0&to=9999999999`);
+    const res = await app.request(`/candles/${SLAB}?resolution=1&from=1745150400&to=1745150460`);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.s).toBe("no_data");
@@ -112,7 +112,7 @@ describe("GET /candles/:slab", () => {
       error: null,
     });
     const app = candleRoutes();
-    const res = await app.request(`/candles/${SLAB}?resolution=1&from=0&to=9999999999`);
+    const res = await app.request(`/candles/${SLAB}?resolution=1&from=1745150400&to=1745150460`);
     const body = await res.json() as any;
     expect(body.s).toBe("ok");
     expect(body.t).toHaveLength(1);
@@ -130,5 +130,33 @@ describe("GET /candles/:slab", () => {
     const app = candleRoutes();
     const res = await app.request(`/candles/${SLAB}?resolution=1&from=1000&to=500`);
     expect(res.status).toBe(400);
+  });
+
+  describe("max date-span cap (BUG-008)", () => {
+    it("rejects a range wider than MAX_BARS buckets at the requested resolution, without querying the DB", async () => {
+      const app = candleRoutes();
+      // resolution=1 (60s buckets) — MAX_BARS(5000) * 60s = 300,000s max span.
+      // Request a multi-year range, far beyond that.
+      const res = await app.request(`/candles/${SLAB}?resolution=1&from=0&to=9999999999`);
+      expect(res.status).toBe(400);
+      const body = await res.json() as any;
+      expect(body.errmsg).toMatch(/exceeds the maximum span/i);
+      // The query must never have been issued for an out-of-bounds range.
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+    });
+
+    it("allows a range exactly at the max span for the requested resolution", async () => {
+      const app = candleRoutes();
+      const maxSpan = 5000 * 60; // MAX_BARS * RES_TO_SECONDS["1"]
+      const res = await app.request(`/candles/${SLAB}?resolution=1&from=1000000&to=${1000000 + maxSpan}`);
+      expect(res.status).toBe(200);
+    });
+
+    it("scales the allowed span with resolution — a multi-year range is fine at daily resolution", async () => {
+      const app = candleRoutes();
+      // resolution=1D (86400s buckets) — MAX_BARS(5000) * 1 day ≈ 13.7 years.
+      const res = await app.request(`/candles/${SLAB}?resolution=1D&from=0&to=400000000`); // ~12.7 years
+      expect(res.status).toBe(200);
+    });
   });
 });

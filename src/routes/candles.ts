@@ -107,6 +107,20 @@ export function candleRoutes(): Hono {
       return c.json({ s: "error", errmsg: "Invalid from/to" }, 400);
     }
 
+    // Cap the requested span to what could actually produce MAX_BARS buckets
+    // at this resolution. Without this, the row cap below (MAX_BARS * 10)
+    // only bounds the RESULT size — the DB still has to scan/sort the full
+    // matching row set for the requested date range to find the first N in
+    // ascending order, which is unbounded for a multi-year range on a
+    // high-volume market regardless of how few rows are eventually returned.
+    const maxSpanSeconds = MAX_BARS * bucketSeconds;
+    if (toSec - fromSec > maxSpanSeconds) {
+      return c.json(
+        { s: "error", errmsg: `Requested range exceeds the maximum span for resolution '${resolution}' (${maxSpanSeconds}s)` },
+        400,
+      );
+    }
+
     try {
       const { data, error } = await getSupabase()
         .from("trades")
