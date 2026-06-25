@@ -10,7 +10,7 @@
 import { Hono } from "hono";
 import { validateSlab } from "../middleware/validateSlab.js";
 import { cacheMiddleware } from "../middleware/cache.js";
-import { getSupabase, createLogger, truncateErrorMessage } from "@percolator/shared";
+import { getSupabase, getNetwork, createLogger, truncateErrorMessage } from "@percolator/shared";
 
 /**
  * GH#1458: Phantom OI guard for history records.
@@ -64,6 +64,7 @@ export function openInterestRoutes(): Hono {
         .from("market_stats")
         .select("total_open_interest, net_lp_pos, lp_sum_abs, lp_max_abs")
         .eq("slab_address", slab)
+        .eq("network", getNetwork())
         .single();
 
       if (statsError && statsError.code !== "PGRST116") {

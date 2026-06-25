@@ -8,7 +8,7 @@
  */
 import { Hono } from "hono";
 import { validateSlab } from "../middleware/validateSlab.js";
-import { getSupabase, createLogger, truncateErrorMessage } from "@percolator/shared";
+import { getSupabase, getNetwork, createLogger, truncateErrorMessage } from "@percolator/shared";
 
 const logger = createLogger("api:insurance");
 
@@ -40,6 +40,7 @@ export function insuranceRoutes(): Hono {
         .from("market_stats")
         .select("insurance_balance, insurance_fee_revenue, total_open_interest")
         .eq("slab_address", slab)
+        .eq("network", getNetwork())
         .single();
 
       if (statsError && statsError.code !== "PGRST116") {

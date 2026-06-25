@@ -5,6 +5,7 @@ import { clearCache } from "../../src/middleware/cache.js";
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
+  getNetwork: vi.fn(() => "devnet"),
   getConnection: vi.fn(),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
@@ -45,6 +46,36 @@ describe("open-interest routes", () => {
     vi.mocked(getSupabase).mockReturnValue(mockSupabase);
   });
 
+  function mockOpenInterestQueries(
+    mockStats: unknown,
+    mockHistory: unknown[] = [],
+    statsError: unknown = null,
+    historyError: unknown = null
+  ) {
+    const statsBuilder: any = {};
+    statsBuilder.select = vi.fn(() => statsBuilder);
+    statsBuilder.eq = vi.fn(() => statsBuilder);
+    statsBuilder.single = vi.fn().mockResolvedValue({
+      data: mockStats,
+      error: statsError,
+    });
+
+    const historyBuilder: any = {};
+    historyBuilder.select = vi.fn(() => historyBuilder);
+    historyBuilder.eq = vi.fn(() => historyBuilder);
+    historyBuilder.order = vi.fn(() => historyBuilder);
+    historyBuilder.limit = vi.fn().mockResolvedValue({
+      data: mockHistory,
+      error: historyError,
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === "market_stats") return statsBuilder;
+      if (table === "oi_history") return historyBuilder;
+      return mockSupabase;
+    });
+  }
+
   describe("GET /open-interest/:slab", () => {
     it("should return OI data and history", async () => {
       const mockStats = {
@@ -67,26 +98,26 @@ describe("open-interest routes", () => {
         },
       ];
 
+      const statsBuilder: any = {};
+      statsBuilder.select = vi.fn(() => statsBuilder);
+      statsBuilder.eq = vi.fn(() => statsBuilder);
+      statsBuilder.single = vi.fn().mockResolvedValue({
+        data: mockStats,
+        error: null,
+      });
+
+      const historyBuilder: any = {};
+      historyBuilder.select = vi.fn(() => historyBuilder);
+      historyBuilder.eq = vi.fn(() => historyBuilder);
+      historyBuilder.order = vi.fn(() => historyBuilder);
+      historyBuilder.limit = vi.fn().mockResolvedValue({
+        data: mockHistory,
+        error: null,
+      });
+
       mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-              })),
-            })),
-          };
-        } else if (table === "oi_history") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn().mockResolvedValue({ data: mockHistory, error: null }),
-                })),
-              })),
-            })),
-          };
-        }
+        if (table === "market_stats") return statsBuilder;
+        if (table === "oi_history") return historyBuilder;
         return mockSupabase;
       });
 
@@ -104,21 +135,7 @@ describe("open-interest routes", () => {
     });
 
     it("should return 404 when market not found", async () => {
-      mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ 
-                  data: null, 
-                  error: { code: "PGRST116" } 
-                }),
-              })),
-            })),
-          };
-        }
-        return mockSupabase;
-      });
+      mockOpenInterestQueries(null, [], { code: "PGRST116" });
 
       const app = openInterestRoutes();
       const res = await app.request("/open-interest/11111111111111111111111111111111");
@@ -145,28 +162,7 @@ describe("open-interest routes", () => {
         lp_max_abs: null,
       };
 
-      mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-              })),
-            })),
-          };
-        } else if (table === "oi_history") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-                })),
-              })),
-            })),
-          };
-        }
-        return mockSupabase;
-      });
+      mockOpenInterestQueries(mockStats, []);
 
       const app = openInterestRoutes();
       const res = await app.request("/open-interest/11111111111111111111111111111111");
@@ -177,22 +173,20 @@ describe("open-interest routes", () => {
       expect(data.netLpPos).toBe("0");
       expect(data.lpSumAbs).toBe("0");
       expect(data.lpMaxAbs).toBe("0");
+      expect(data.history).toHaveLength(0);
     });
 
     it("should handle database errors", async () => {
+      const statsBuilder: any = {};
+      statsBuilder.select = vi.fn(() => statsBuilder);
+      statsBuilder.eq = vi.fn(() => statsBuilder);
+      statsBuilder.single = vi.fn().mockResolvedValue({
+        data: null,
+        error: new Error("Database error"),
+      });
+
       mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ 
-                  data: null, 
-                  error: new Error("Database error") 
-                }),
-              })),
-            })),
-          };
-        }
+        if (table === "market_stats") return statsBuilder;
         return mockSupabase;
       });
 
@@ -213,30 +207,31 @@ describe("open-interest routes", () => {
       };
 
       let limitCalled = false;
+
+      const statsBuilder: any = {};
+      statsBuilder.select = vi.fn(() => statsBuilder);
+      statsBuilder.eq = vi.fn(() => statsBuilder);
+      statsBuilder.single = vi.fn().mockResolvedValue({
+        data: mockStats,
+        error: null,
+      });
+
+      const historyBuilder: any = {};
+      historyBuilder.select = vi.fn(() => historyBuilder);
+      historyBuilder.eq = vi.fn(() => historyBuilder);
+      historyBuilder.order = vi.fn(() => historyBuilder);
+      historyBuilder.limit = vi.fn((n: number) => {
+        expect(n).toBe(100);
+        limitCalled = true;
+        return Promise.resolve({
+          data: [],
+          error: null,
+        });
+      });
+
       mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-              })),
-            })),
-          };
-        } else if (table === "oi_history") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn((n: number) => {
-                    expect(n).toBe(100);
-                    limitCalled = true;
-                    return Promise.resolve({ data: [], error: null });
-                  }),
-                })),
-              })),
-            })),
-          };
-        }
+        if (table === "market_stats") return statsBuilder;
+        if (table === "oi_history") return historyBuilder;
         return mockSupabase;
       });
 
@@ -254,26 +249,26 @@ describe("open-interest routes", () => {
         lp_max_abs: "500000",
       };
 
+      const statsBuilder: any = {};
+      statsBuilder.select = vi.fn(() => statsBuilder);
+      statsBuilder.eq = vi.fn(() => statsBuilder);
+      statsBuilder.single = vi.fn().mockResolvedValue({
+        data: mockStats,
+        error: null,
+      });
+
+      const historyBuilder: any = {};
+      historyBuilder.select = vi.fn(() => historyBuilder);
+      historyBuilder.eq = vi.fn(() => historyBuilder);
+      historyBuilder.order = vi.fn(() => historyBuilder);
+      historyBuilder.limit = vi.fn().mockResolvedValue({
+        data: [],
+        error: null,
+      });
+
       mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-              })),
-            })),
-          };
-        } else if (table === "oi_history") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-                })),
-              })),
-            })),
-          };
-        }
+        if (table === "market_stats") return statsBuilder;
+        if (table === "oi_history") return historyBuilder;
         return mockSupabase;
       });
 
@@ -294,97 +289,70 @@ describe("open-interest routes", () => {
         "3ZKKwsKoo5UP28cYmMpvGpwoFpWLVgEWLQJCejJnECQn",
       ];
 
-      for (const addr of BLOCKED) {
-        it(`returns 404 for blocked slab ${addr.slice(0, 8)}... on /open-interest`, async () => {
-          const app = openInterestRoutes();
-          const res = await app.request(`/open-interest/${addr}`);
-          expect(res.status).toBe(404);
-          const data = await res.json();
-          expect(data).toEqual({ error: "Market not found" });
-          // DB should never be queried for blocked slabs
+    for (const addr of BLOCKED) {
+      it(`returns 404 for blocked slab ${addr.slice(0, 8)}... on /open-interest`, async () => {
+        const app = openInterestRoutes();
+        const res = await app.request(`/open-interest/${addr}`);
+        expect(res.status).toBe(404);
+        const data = await res.json();
+        expect(data).toEqual({ error: "Market not found" });
+        // DB should never be queried for blocked slabs
           expect(mockSupabase.from).not.toHaveBeenCalled();
-        });
-      }
+      });
+    }
 
       it("allows valid non-blocked slabs through to DB layer", async () => {
+        const statsBuilder: any = {};
+        statsBuilder.select = vi.fn(() => statsBuilder);
+        statsBuilder.eq = vi.fn(() => statsBuilder);
+        statsBuilder.single = vi.fn().mockResolvedValue({
+          data: {
+            total_open_interest: "1000",
+            net_lp_pos: "100",
+            lp_sum_abs: "200",
+            lp_max_abs: "50",
+          },
+          error: null,
+        });
+
+        const historyBuilder: any = {};
+        historyBuilder.select = vi.fn(() => historyBuilder);
+        historyBuilder.eq = vi.fn(() => historyBuilder);
+        historyBuilder.order = vi.fn(() => historyBuilder);
+        historyBuilder.limit = vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        });
+
         mockSupabase.from.mockImplementation((table: string) => {
-          if (table === "market_stats") {
-            return {
-              select: vi.fn(() => ({
-                eq: vi.fn(() => ({
-                  single: vi.fn().mockResolvedValue({
-                    data: {
-                      total_open_interest: "1000",
-                      net_lp_pos: "100",
-                      lp_sum_abs: "200",
-                      lp_max_abs: "50",
-                    },
-                    error: null,
-                  }),
-                })),
-              })),
-            };
-          } else if (table === "oi_history") {
-            return {
-              select: vi.fn(() => ({
-                eq: vi.fn(() => ({
-                  order: vi.fn(() => ({
-                    limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-                  })),
-                })),
-              })),
-            };
-          }
+          if (table === "market_stats") return statsBuilder;
+          if (table === "oi_history") return historyBuilder;
           return mockSupabase;
         });
 
         const app = openInterestRoutes();
         const res = await app.request("/open-interest/11111111111111111111111111111111");
+
         expect(res.status).toBe(200);
       });
-    });
+
+      });
 
     describe("GH#1458: phantom OI history filter — pre-migration values (9.87e+34) excluded", () => {
       // usdEkK5G (11111111...) and MOLTBOT (22222222...) oi_history contained rows
       // with total_oi = 9.87e+34 from uninitialized on-chain state. These must be
       // stripped before the chart data is returned.
 
-      const PHANTOM_OI = "987000000000000000000000000000000000"; // ~9.87e+35
+      const PHANTOM_OI = "98700000000000000000000000000000000";
       const VALID_OI_1 = "5000000000";
       const VALID_OI_2 = "4800000000";
 
-      function mockSupabaseWithHistory(history: Array<{ timestamp: string; total_oi: string; net_lp_pos: string }>) {
-        return (table: string) => {
-          if (table === "market_stats") {
-            return {
-              select: vi.fn(() => ({
-                eq: vi.fn(() => ({
-                  single: vi.fn().mockResolvedValue({
-                    data: {
-                      total_open_interest: VALID_OI_1,
-                      net_lp_pos: "1500000",
-                      lp_sum_abs: "2000000",
-                      lp_max_abs: "500000",
-                    },
-                    error: null,
-                  }),
-                })),
-              })),
-            };
-          } else if (table === "oi_history") {
-            return {
-              select: vi.fn(() => ({
-                eq: vi.fn(() => ({
-                  order: vi.fn(() => ({
-                    limit: vi.fn().mockResolvedValue({ data: history, error: null }),
-                  })),
-                })),
-              })),
-            };
-          }
-          return mockSupabase;
-        };
-      }
+      const mockGh1458Stats = {
+        total_open_interest: VALID_OI_1,
+        net_lp_pos: "1500000",
+        lp_sum_abs: "2000000",
+        lp_max_abs: "500000",
+      };
 
       it("strips phantom history records (total_oi >= 1e18) from response", async () => {
         const history = [
@@ -393,7 +361,7 @@ describe("open-interest routes", () => {
           { timestamp: "2026-01-03T00:00:00Z", total_oi: VALID_OI_2, net_lp_pos: "1400000" },   // real — included
         ];
 
-        mockSupabase.from.mockImplementation(mockSupabaseWithHistory(history));
+        mockOpenInterestQueries(mockGh1458Stats, history);
 
         const app = openInterestRoutes();
         const res = await app.request("/open-interest/11111111111111111111111111111111");
@@ -414,7 +382,7 @@ describe("open-interest routes", () => {
           { timestamp: "2026-01-02T00:00:00Z", total_oi: VALID_OI_2, net_lp_pos: "1500000" },  // real — included
         ];
 
-        mockSupabase.from.mockImplementation(mockSupabaseWithHistory(history));
+        mockOpenInterestQueries(mockGh1458Stats, history);
 
         const app = openInterestRoutes();
         const res = await app.request("/open-interest/11111111111111111111111111111111");
@@ -431,7 +399,7 @@ describe("open-interest routes", () => {
           { timestamp: "2026-01-02T00:00:00Z", total_oi: VALID_OI_2, net_lp_pos: "1400000" },
         ];
 
-        mockSupabase.from.mockImplementation(mockSupabaseWithHistory(history));
+        mockOpenInterestQueries(mockGh1458Stats, history);
 
         const app = openInterestRoutes();
         const res = await app.request("/open-interest/11111111111111111111111111111111");
@@ -447,7 +415,7 @@ describe("open-interest routes", () => {
           { timestamp: "2026-01-02T00:00:00Z", total_oi: PHANTOM_OI, net_lp_pos: "0" },
         ];
 
-        mockSupabase.from.mockImplementation(mockSupabaseWithHistory(history));
+        mockOpenInterestQueries(mockGh1458Stats, history);
 
         const app = openInterestRoutes();
         const res = await app.request("/open-interest/11111111111111111111111111111111");
@@ -467,7 +435,7 @@ describe("open-interest routes", () => {
           { timestamp: "2026-01-02T00:00:00Z", total_oi: VALID_OI_1, net_lp_pos: "1500000" },
         ];
 
-        mockSupabase.from.mockImplementation(mockSupabaseWithHistory(history));
+        mockOpenInterestQueries(mockGh1458Stats, history);
 
         const app = openInterestRoutes();
         const res = await app.request("/open-interest/11111111111111111111111111111111");

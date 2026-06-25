@@ -4,6 +4,7 @@ import { insuranceRoutes } from "../../src/routes/insurance.js";
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
+  getNetwork: vi.fn(() => "devnet"),
   getConnection: vi.fn(),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
@@ -42,6 +43,36 @@ describe("insurance routes", () => {
     vi.mocked(getSupabase).mockReturnValue(mockSupabase);
   });
 
+  function mockInsuranceQueries(
+    mockStats: unknown,
+    mockHistory: unknown[] = [],
+    statsError: unknown = null,
+    historyError: unknown = null
+  ) {
+    const statsBuilder: any = {};
+    statsBuilder.select = vi.fn(() => statsBuilder);
+    statsBuilder.eq = vi.fn(() => statsBuilder);
+    statsBuilder.single = vi.fn().mockResolvedValue({
+      data: mockStats,
+      error: statsError,
+    });
+
+    const historyBuilder: any = {};
+    historyBuilder.select = vi.fn(() => historyBuilder);
+    historyBuilder.eq = vi.fn(() => historyBuilder);
+    historyBuilder.order = vi.fn(() => historyBuilder);
+    historyBuilder.limit = vi.fn().mockResolvedValue({
+      data: mockHistory,
+      error: historyError,
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === "market_stats") return statsBuilder;
+      if (table === "insurance_history") return historyBuilder;
+      return mockSupabase;
+    });
+  }
+
   describe("GET /insurance/:slab", () => {
     it("should return current insurance balance and history", async () => {
       const mockStats = {
@@ -63,28 +94,7 @@ describe("insurance routes", () => {
         },
       ];
 
-      mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-              })),
-            })),
-          };
-        } else if (table === "insurance_history") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn().mockResolvedValue({ data: mockHistory, error: null }),
-                })),
-              })),
-            })),
-          };
-        }
-        return mockSupabase;
-      });
+      mockInsuranceQueries(mockStats, mockHistory);
 
       const app = insuranceRoutes();
       const res = await app.request("/insurance/11111111111111111111111111111111");
@@ -99,22 +109,7 @@ describe("insurance routes", () => {
     });
 
     it("should return 404 when market not found", async () => {
-      mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ 
-                  data: null, 
-                  error: { code: "PGRST116" } 
-                }),
-              })),
-            })),
-          };
-        }
-        return mockSupabase;
-      });
-
+      mockInsuranceQueries(null, [], { code: "PGRST116" });
       const app = insuranceRoutes();
       const res = await app.request("/insurance/11111111111111111111111111111111");
 
@@ -139,28 +134,7 @@ describe("insurance routes", () => {
         total_open_interest: null,
       };
 
-      mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-              })),
-            })),
-          };
-        } else if (table === "insurance_history") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-                })),
-              })),
-            })),
-          };
-        }
-        return mockSupabase;
-      });
+      mockInsuranceQueries(mockStats, []);
 
       const app = insuranceRoutes();
       const res = await app.request("/insurance/11111111111111111111111111111111");
@@ -173,21 +147,7 @@ describe("insurance routes", () => {
     });
 
     it("should handle database errors", async () => {
-      mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ 
-                  data: null, 
-                  error: new Error("Database error") 
-                }),
-              })),
-            })),
-          };
-        }
-        return mockSupabase;
-      });
+      mockInsuranceQueries(null, [], new Error("Database error"));
 
       const app = insuranceRoutes();
       const res = await app.request("/insurance/11111111111111111111111111111111");
@@ -205,30 +165,31 @@ describe("insurance routes", () => {
       };
 
       let limitCalled = false;
+
+      const statsBuilder: any = {};
+      statsBuilder.select = vi.fn(() => statsBuilder);
+      statsBuilder.eq = vi.fn(() => statsBuilder);
+      statsBuilder.single = vi.fn().mockResolvedValue({
+        data: mockStats,
+        error: null,
+      });
+
+      const historyBuilder: any = {};
+      historyBuilder.select = vi.fn(() => historyBuilder);
+      historyBuilder.eq = vi.fn(() => historyBuilder);
+      historyBuilder.order = vi.fn(() => historyBuilder);
+      historyBuilder.limit = vi.fn((n: number) => {
+        expect(n).toBe(100);
+        limitCalled = true;
+        return Promise.resolve({
+          data: [],
+          error: null,
+        });
+      });
+
       mockSupabase.from.mockImplementation((table: string) => {
-        if (table === "market_stats") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                single: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
-              })),
-            })),
-          };
-        } else if (table === "insurance_history") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn((n: number) => {
-                    expect(n).toBe(100);
-                    limitCalled = true;
-                    return Promise.resolve({ data: [], error: null });
-                  }),
-                })),
-              })),
-            })),
-          };
-        }
+        if (table === "market_stats") return statsBuilder;
+        if (table === "insurance_history") return historyBuilder;
         return mockSupabase;
       });
 
@@ -260,38 +221,18 @@ describe("insurance routes", () => {
       }
 
       it("allows valid non-blocked slabs through to DB layer", async () => {
-        mockSupabase.from.mockImplementation((table: string) => {
-          if (table === "market_stats") {
-            return {
-              select: vi.fn(() => ({
-                eq: vi.fn(() => ({
-                  single: vi.fn().mockResolvedValue({
-                    data: {
-                      insurance_balance: "1000000000",
-                      insurance_fee_revenue: "50000000",
-                      total_open_interest: "5000000000",
-                    },
-                    error: null,
-                  }),
-                })),
-              })),
-            };
-          } else if (table === "insurance_history") {
-            return {
-              select: vi.fn(() => ({
-                eq: vi.fn(() => ({
-                  order: vi.fn(() => ({
-                    limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-                  })),
-                })),
-              })),
-            };
-          }
-          return mockSupabase;
-        });
+        mockInsuranceQueries(
+          {
+            insurance_balance: "1000000000",
+            insurance_fee_revenue: "50000000",
+            total_open_interest: "5000000000",
+          },
+          []
+        );
 
         const app = insuranceRoutes();
         const res = await app.request("/insurance/11111111111111111111111111111111");
+
         expect(res.status).toBe(200);
       });
     });

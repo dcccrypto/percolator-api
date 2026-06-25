@@ -120,6 +120,7 @@ export function marketRoutes(): Hono {
         .from("market_stats")
         .select("slab_address, total_open_interest, total_accounts, last_crank_slot, last_price, mark_price, index_price, funding_rate, net_lp_pos, lp_sum_abs, lp_max_abs, insurance_balance, insurance_fee_revenue, volume_24h, updated_at")
         .eq("slab_address", slab)
+        .eq("network", getNetwork())
         .single();
       if (error && error.code !== "PGRST116") throw error;
       return c.json({ stats: data ?? null });

@@ -145,6 +145,7 @@ export function fundingRoutes(): Hono {
         // causes a PostgREST 400. Downstream defaults assetIndex to 0. Same fix as crank.ts (e471efb).
         .select("funding_rate, net_lp_pos, symbol, last_price")
         .eq("slab_address", slab)
+        .eq("network", getNetwork())
         .single();
 
       if (statsError && statsError.code !== "PGRST116") {
