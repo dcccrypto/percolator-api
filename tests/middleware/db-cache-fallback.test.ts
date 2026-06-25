@@ -98,4 +98,37 @@ describe("withDbCacheFallback", () => {
     expect(res.headers.get("X-Cache-Status")).toBe("stale-fallback");
     expect(res.headers.get("Warning")).toMatch(/^110 - "Response is Stale/);
   });
+
+  it("coalesces concurrent calls for the same key into a single queryFn invocation (BUG-004)", async () => {
+    let resolveQuery: (value: { value: string }) => void;
+    const queryFn = vi.fn(
+      () =>
+        new Promise<{ value: string }>((resolve) => {
+          resolveQuery = resolve;
+        }),
+    );
+
+    const app = makeApp(async (c) => {
+      const result = await withDbCacheFallback("test:coalesce", queryFn, c);
+      if (result instanceof Response) return result;
+      return c.json(result.data);
+    });
+
+    // Two concurrent callers for the same key, neither awaited before the
+    // other starts — exactly the thundering-herd scenario from BUG-004.
+    const reqA = app.request("/test");
+    const reqB = app.request("/test");
+
+    // Both requests have reached the coalescing check by now (queryFn's
+    // promise hasn't resolved yet), so a second invocation here would prove
+    // de-duplication failed.
+    expect(queryFn).toHaveBeenCalledTimes(1);
+
+    resolveQuery!({ value: "shared-result" });
+
+    const [resA, resB] = await Promise.all([reqA, reqB]);
+    expect(await resA.json()).toEqual({ value: "shared-result" });
+    expect(await resB.json()).toEqual({ value: "shared-result" });
+    expect(queryFn).toHaveBeenCalledTimes(1);
+  });
 });

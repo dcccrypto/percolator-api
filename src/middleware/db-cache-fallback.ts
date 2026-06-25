@@ -22,6 +22,35 @@ const MAX_STALE_AGE_MS = 60 * 60 * 1000;
 
 const MAX_DB_CACHE_ENTRIES = 200;
 
+// In-flight request coalescing: cacheKey → pending queryFn() call. Without
+// this, N concurrent callers for the same key each independently re-run the
+// (possibly expensive) query and race to overwrite dbCache with whichever
+// happens to resolve last — not necessarily the most current result. Only
+// queryFn() itself is coalesced; the cache write and staleness-header logic
+// below still run per-caller against that caller's own `c`, so each caller's
+// HTTP response gets correct headers without needing to thread them back out
+// of the shared promise. Mirrors the proven pattern in oracle-router.ts: the
+// entry is deleted only after settling, so a request arriving immediately
+// after resolution sees a populated cache rather than racing to re-fetch.
+const inflightQueries = new Map<string, Promise<unknown>>();
+
+async function runCoalesced<T>(cacheKey: string, queryFn: () => Promise<T>): Promise<T> {
+  let promise = inflightQueries.get(cacheKey) as Promise<T> | undefined;
+  if (!promise) {
+    promise = queryFn()
+      .then((result) => {
+        inflightQueries.delete(cacheKey);
+        return result;
+      })
+      .catch((err) => {
+        inflightQueries.delete(cacheKey);
+        throw err;
+      });
+    inflightQueries.set(cacheKey, promise as Promise<unknown>);
+  }
+  return promise;
+}
+
 /**
  * Discriminated success result returned by withDbCacheFallback. Callers
  * narrow against `instanceof Response` to handle the error path; on the
@@ -54,9 +83,10 @@ export async function withDbCacheFallback<T>(
   c: Context
 ): Promise<DbCacheResult<T> | Response> {
   try {
-    // Try the query
-    const result = await queryFn();
-    
+    // Try the query — coalesced so concurrent callers for the same key share
+    // one in-flight call instead of each independently hitting the DB.
+    const result = await runCoalesced(cacheKey, queryFn);
+
     // Evict oldest entries when at capacity
     while (dbCache.size >= MAX_DB_CACHE_ENTRIES) {
       const oldest = dbCache.keys().next().value;
