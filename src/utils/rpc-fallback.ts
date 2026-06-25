@@ -12,7 +12,7 @@
  */
 
 import type { Connection } from "@solana/web3.js";
-import { getFallbackConnection, createLogger } from "@percolator/shared";
+import { getFallbackConnection, createLogger, truncateErrorMessage } from "@percolator/shared";
 import { withRpcTimeout } from "./rpc-timeout.js";
 
 const logger = createLogger("api:rpc-fallback");
@@ -35,7 +35,18 @@ export async function withRpcFallback<T>(
 
     logger.warn("Primary RPC failed, trying fallback", {
       operation,
-      error: primaryErr instanceof Error ? primaryErr.message : String(primaryErr),
+      // Truncated like every other error-log call site in this codebase
+      // (health.ts, markets.ts, etc.) — this was the one place that logged
+      // the raw, untruncated message. truncateErrorMessage only bounds
+      // length (it doesn't redact secrets), so this brings the exposure
+      // window in line with the rest of the codebase rather than fully
+      // eliminating it: RPC connection errors can embed the full endpoint
+      // URL, and paid providers (Helius/Alchemy) embed an API key in that
+      // URL, so a short error message could still leak it even truncated.
+      error: truncateErrorMessage(
+        primaryErr instanceof Error ? primaryErr.message : String(primaryErr),
+        120,
+      ),
     });
 
     return await withRpcTimeout(
