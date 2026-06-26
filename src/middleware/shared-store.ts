@@ -105,6 +105,18 @@ export interface SharedStore {
 
   /** Evict stale auth-failure records (best-effort; no-op on Redis). */
   evictExpiredAuthFailures(windowMs: number, banDurationMs: number): Promise<void>;
+
+  /**
+   * Liveness probe for the backing store, used by /health.
+   *
+   * InMemoryStore is trivially always healthy — it's the deliberately
+   * chosen single-replica backend, not a degraded state. UpstashStore
+   * issues a real Redis PING (no fallback masking) so operators can detect
+   * when multi-replica abuse-control guarantees have silently degraded to
+   * per-replica enforcement, instead of only finding out from scattered
+   * warning logs on individual failed calls.
+   */
+  ping(): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +251,10 @@ export class InMemoryStore implements SharedStore {
           : now - rec.windowStart > windowMs * 2;
       if (stale) this.authFailures.delete(ip);
     }
+  }
+
+  async ping(): Promise<boolean> {
+    return true;
   }
 }
 
@@ -495,6 +511,19 @@ export class UpstashStore implements SharedStore {
 
   async evictExpiredAuthFailures(_windowMs: number, _banDurationMs: number): Promise<void> {
     // Redis TTL handles eviction automatically. No-op here.
+  }
+
+  async ping(): Promise<boolean> {
+    try {
+      const result = await this.cmd("PING");
+      return typeof result === "string" && result.toUpperCase() === "PONG";
+    } catch (err) {
+      logger.warn(
+        "UpstashStore.ping failed — Redis unreachable, abuse controls are running in per-replica fallback mode",
+        { error: err instanceof Error ? err.message : String(err) }
+      );
+      return false;
+    }
   }
 }
 

@@ -5,6 +5,7 @@ import { withRpcFallback } from "../utils/rpc-fallback.js";
 import { HEALTH_RPC_TIMEOUT_MS } from "../utils/rpc-timeout.js";
 import { getWebSocketMetrics } from "./ws.js";
 import { requireApiKey } from "../middleware/auth.js";
+import { getSharedStore } from "../middleware/shared-store.js";
 
 const logger = createLogger("api:health");
 const startTime = Date.now();
@@ -24,7 +25,7 @@ export function healthRoutes(): Hono {
     if (cachedHealth && Date.now() - cachedHealth.checkedAt < HEALTH_CACHE_TTL_MS) {
       return c.json(cachedHealth.body, cachedHealth.statusCode as 200 | 503);
     }
-    const checks: { db: boolean; rpc: boolean; ws: boolean } = { db: false, rpc: false, ws: false };
+    const checks: { db: boolean; rpc: boolean; ws: boolean; sharedStore: boolean } = { db: false, rpc: false, ws: false, sharedStore: false };
     let status: "ok" | "degraded" | "down" = "ok";
     
     // Check RPC connectivity
@@ -61,6 +62,17 @@ export function healthRoutes(): Hono {
       checks.ws = utilization < 0.95; // degraded if >95% of connection slots used
     } catch {
       checks.ws = false;
+    }
+
+    // Check the shared abuse-control store — when Upstash is configured but
+    // unreachable, rate limits/connection caps/auth bans silently degrade to
+    // per-replica enforcement. ping() surfaces that instead of leaving it to
+    // scattered warning logs (see shared-store.ts for the multi-replica
+    // rationale).
+    try {
+      checks.sharedStore = await getSharedStore().ping();
+    } catch {
+      checks.sharedStore = false;
     }
 
     // Determine overall status

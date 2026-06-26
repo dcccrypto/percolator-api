@@ -247,6 +247,51 @@ describe("UpstashStore — graceful fallback", () => {
 });
 
 // ---------------------------------------------------------------------------
+// ping() liveness probe (BUG-111)
+// ---------------------------------------------------------------------------
+
+describe("ping() liveness probe (BUG-111)", () => {
+  it("InMemoryStore.ping() is always true — it's the deliberately chosen backend", async () => {
+    const store = new InMemoryStore();
+    expect(await store.ping()).toBe(true);
+  });
+
+  it("UpstashStore.ping() returns true on a successful PONG", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ result: "PONG" }]), { status: 200 })
+    );
+
+    const store = new UpstashStore("https://test.upstash.io", "token");
+    expect(await store.ping()).toBe(true);
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it("UpstashStore.ping() returns false (not the silent in-memory fallback) when Redis is unreachable", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network unreachable"));
+
+    const store = new UpstashStore("https://test.upstash.io", "token");
+    expect(await store.ping()).toBe(false);
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it("UpstashStore.ping() returns false on a non-PONG response", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ result: null }]), { status: 200 })
+    );
+
+    const store = new UpstashStore("https://test.upstash.io", "token");
+    expect(await store.ping()).toBe(false);
+
+    globalThis.fetch = originalFetch;
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getSharedStore() singleton selection
 // ---------------------------------------------------------------------------
 

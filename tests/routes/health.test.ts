@@ -9,6 +9,13 @@ vi.mock("../../src/routes/ws.js", () => ({
   })),
 }));
 
+// Mock shared store
+vi.mock("../../src/middleware/shared-store.js", () => ({
+  getSharedStore: vi.fn(() => ({
+    ping: vi.fn().mockResolvedValue(true),
+  })),
+}));
+
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
@@ -32,6 +39,7 @@ vi.mock("@percolator/shared", () => ({
 
 const { getConnection, getSupabase } = await import("@percolator/shared");
 const { getWebSocketMetrics } = await import("../../src/routes/ws.js");
+const { getSharedStore } = await import("../../src/middleware/shared-store.js");
 
 describe("health routes", () => {
   let mockConnection: any;
@@ -102,6 +110,7 @@ describe("health routes", () => {
     mockConnection.getSlot.mockRejectedValue(new Error("RPC error"));
     mockSupabase.select.mockRejectedValue(new Error("DB error"));
     vi.mocked(getWebSocketMetrics).mockImplementation(() => { throw new Error("WS unavailable"); });
+    vi.mocked(getSharedStore).mockReturnValue({ ping: vi.fn().mockResolvedValue(false) } as any);
 
     const app = healthRoutes();
     const res = await app.request("/health");
@@ -112,6 +121,53 @@ describe("health routes", () => {
     expect(data.checks.rpc).toBe(false);
     expect(data.checks.db).toBe(false);
     expect(data.checks.ws).toBe(false);
+    expect(data.checks.sharedStore).toBe(false);
+  });
+
+  describe("shared store health check (BUG-111)", () => {
+    it("flags sharedStore as unhealthy when ping() resolves false", async () => {
+      mockConnection.getSlot.mockResolvedValue(100);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+      vi.mocked(getSharedStore).mockReturnValue({ ping: vi.fn().mockResolvedValue(false) } as any);
+
+      const app = healthRoutes();
+      const res = await app.request("/health");
+      const data = await res.json();
+      expect(data.checks.sharedStore).toBe(false);
+      expect(data.status).not.toBe("ok");
+    });
+
+    it("flags sharedStore as unhealthy when ping() throws", async () => {
+      mockConnection.getSlot.mockResolvedValue(100);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+      vi.mocked(getSharedStore).mockReturnValue({
+        ping: vi.fn().mockRejectedValue(new Error("Redis unreachable")),
+      } as any);
+
+      const app = healthRoutes();
+      const res = await app.request("/health");
+      const data = await res.json();
+      expect(data.checks.sharedStore).toBe(false);
+    });
+
+    it("reports sharedStore healthy when ping() resolves true", async () => {
+      mockConnection.getSlot.mockResolvedValue(100);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+      // A prior test in this file overrides the ws mock's implementation;
+      // clearAllMocks() doesn't undo that, so restore an explicit healthy
+      // value here rather than depending on test execution order.
+      vi.mocked(getWebSocketMetrics).mockReturnValue({
+        totalConnections: 0,
+        limits: { maxGlobalConnections: 1000 },
+      } as any);
+      vi.mocked(getSharedStore).mockReturnValue({ ping: vi.fn().mockResolvedValue(true) } as any);
+
+      const app = healthRoutes();
+      const res = await app.request("/health");
+      const data = await res.json();
+      expect(data.checks.sharedStore).toBe(true);
+      expect(data.status).toBe("ok");
+    });
   });
 
   it("should include uptime in response", async () => {
