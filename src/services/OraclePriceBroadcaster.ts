@@ -72,10 +72,17 @@ export class OraclePriceBroadcaster {
                 slab: row.slab_address,
                 priceE6,
               });
+              // oracle_prices carries only a single push price per row — there is
+              // no separate mark/index price in this event source. Previously this
+              // hardcoded markPriceE6/indexPriceE6 to the same oracle price, so
+              // every live WS tick reported markPrice === indexPrice === oracle
+              // price, contradicting the genuinely distinct values the same
+              // channel sends from market_stats on initial subscribe (ws.ts
+              // flushPriceUpdate's own `markPriceE6 ? ... : undefined` check
+              // already exists to omit these fields when not genuinely known —
+              // it was just never reachable because this was always truthy).
               eventBus.publish("price.updated", row.slab_address, {
                 priceE6,
-                markPriceE6: priceE6,
-                indexPriceE6: priceE6,
                 source: "oracle_prices",
                 tx_signature: row.tx_signature ?? undefined,
               });
