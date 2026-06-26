@@ -1112,7 +1112,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
           }
         }
       } catch (err) {
-        logger.warn("Error processing WS message", { ip: client.ip, error: err });
+        logger.warn("Error processing WS message", { ip: client.ip, error: err instanceof Error ? err.message : String(err) });
         safeSend(ws, { type: "error", message: "Invalid message" });
       }
     });

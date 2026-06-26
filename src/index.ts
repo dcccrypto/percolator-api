@@ -393,7 +393,9 @@ async function shutdown(signal: string): Promise<void> {
     logger.info("Shutdown complete");
     process.exit(0);
   } catch (err) {
-    logger.error("Error during shutdown", { error: err });
+    logger.error("Error during shutdown", {
+      error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120),
+    });
     process.exit(1);
   }
 }
@@ -401,7 +403,10 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("uncaughtException", (err) => {
-  logger.error("Uncaught exception", { error: err.message, stack: err.stack });
+  logger.error("Uncaught exception", {
+    error: truncateErrorMessage(err.message, 120),
+    stack: truncateErrorMessage(err.stack ?? "", 500),
+  });
   shutdown("uncaughtException");
 });
 process.on("unhandledRejection", (reason) => {

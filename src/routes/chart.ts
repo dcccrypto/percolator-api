@@ -21,7 +21,7 @@
  */
 import { Hono } from "hono";
 import { PublicKey } from "@solana/web3.js";
-import { createLogger } from "@percolator/shared";
+import { createLogger, truncateErrorMessage } from "@percolator/shared";
 
 const logger = createLogger("api:chart");
 
@@ -88,7 +88,7 @@ async function getTopPool(mint: string): Promise<string | null> {
     }
     return raw;
   } catch (err) {
-    logger.warn("getTopPool fetch error", { mint, err });
+    logger.warn("getTopPool fetch error", { mint, error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
     return null;
   } finally {
     clearTimeout(timer);
@@ -133,7 +133,7 @@ async function fetchOhlcv(
         .sort((a, b) => a.timestamp - b.timestamp)
     );
   } catch (err) {
-    logger.warn("fetchOhlcv error", { poolAddress, err });
+    logger.warn("fetchOhlcv error", { poolAddress, error: truncateErrorMessage(err instanceof Error ? err.message : String(err), 120) });
     return [];
   } finally {
     clearTimeout(timer);

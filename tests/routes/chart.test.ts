@@ -2,13 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vites
 import { chartRoutes } from "../../src/routes/chart.js";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
+// A single shared logger instance (not a fresh object per createLogger()
+// call) so tests can assert on calls made by chart.ts's module-scoped
+// `logger`, which is only constructed once at import time.
+const { mockLogger } = vi.hoisted(() => ({
+  mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
 vi.mock("@percolator/shared", () => ({
-  createLogger: vi.fn(() => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  })),
+  createLogger: vi.fn(() => mockLogger),
+  truncateErrorMessage: (msg: unknown, maxLength = 120) => {
+    const str = typeof msg === "string" ? msg : String(msg);
+    return str.length > maxLength ? str.slice(0, maxLength) + "..." : str;
+  },
 }));
 
 // Mock global fetch
@@ -100,6 +106,44 @@ describe("GET /chart/:mint", () => {
     const body = await res.json();
     expect(body.candles).toEqual([]);
     expect(body.poolAddress).toBeNull();
+  });
+
+  describe("error logging (BUG-113)", () => {
+    it("logs a truncated string (not the raw Error object) when the pool fetch throws", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("network exploded"));
+
+      const app = makeApp();
+      const res = await app.request(
+        new Request(`http://localhost/chart/${VALID_MINT}?_nocache=logtest1`)
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.candles).toEqual([]);
+
+      const call = mockLogger.warn.mock.calls.find((c) => c[0] === "getTopPool fetch error");
+      expect(call).toBeDefined();
+      expect(typeof call![1].error).toBe("string");
+      expect(call![1].error).toContain("network exploded");
+    });
+
+    it("logs a truncated string (not the raw Error object) when the OHLCV fetch throws", async () => {
+      mockFetch
+        .mockResolvedValueOnce(makeJsonRes(MOCK_POOL_RES))
+        .mockRejectedValueOnce(new Error("ohlcv exploded"));
+
+      const app = makeApp();
+      const res = await app.request(
+        new Request(`http://localhost/chart/${VALID_MINT}?_nocache=logtest2`)
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.candles).toEqual([]);
+
+      const call = mockLogger.warn.mock.calls.find((c) => c[0] === "fetchOhlcv error");
+      expect(call).toBeDefined();
+      expect(typeof call![1].error).toBe("string");
+      expect(call![1].error).toContain("ohlcv exploded");
+    });
   });
 
   it("returns OHLCV candles on success", async () => {
