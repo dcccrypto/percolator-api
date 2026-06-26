@@ -128,6 +128,50 @@ describe("GET /chart/:mint", () => {
     expect(c.timestamp).toBe(1700000000 * 1000);
   });
 
+  it("coalesces concurrent requests for the same key into a single upstream fetch pair (BUG-107)", async () => {
+    let resolvePoolFetch: ((res: Response) => void) | undefined;
+    let resolveOhlcvFetch: ((res: Response) => void) | undefined;
+    let fetchCallCount = 0;
+
+    mockFetch.mockImplementation((url: string) => {
+      fetchCallCount++;
+      if (url.includes("/ohlcv/")) {
+        return new Promise<Response>((resolve) => {
+          resolveOhlcvFetch = resolve;
+        });
+      }
+      return new Promise<Response>((resolve) => {
+        resolvePoolFetch = resolve;
+      });
+    });
+
+    const app = makeApp();
+    // Distinct params (timeframe=day) so this test's cache key can't collide
+    // with any other test's cached entry.
+    const reqA = app.request(`http://localhost/chart/${VALID_MINT}?timeframe=day&limit=10`);
+    const reqB = app.request(`http://localhost/chart/${VALID_MINT}?timeframe=day&limit=10`);
+
+    // Both requests have already reached the coalescing check (the pool
+    // fetch is suspended on the unresolved promise below) — a second
+    // pool-resolution call here would prove de-duplication failed.
+    expect(fetchCallCount).toBe(1);
+
+    resolvePoolFetch!(makeJsonRes(MOCK_POOL_RES));
+    // Let the pool-resolution .then() chain proceed to the OHLCV fetch.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchCallCount).toBe(2);
+
+    resolveOhlcvFetch!(makeJsonRes(MOCK_OHLCV_RES));
+
+    const [resA, resB] = await Promise.all([reqA, reqB]);
+    const [bodyA, bodyB] = await Promise.all([resA.json(), resB.json()]);
+
+    expect(bodyA.candles).toHaveLength(3);
+    expect(bodyB.candles).toEqual(bodyA.candles);
+    // Still exactly 2 upstream calls total (one pool + one OHLCV) — never 4.
+    expect(fetchCallCount).toBe(2);
+  });
+
   it("sets Cache-Control header on successful response", async () => {
     mockFetch
       .mockResolvedValueOnce(makeJsonRes(MOCK_POOL_RES))

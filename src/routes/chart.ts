@@ -46,6 +46,17 @@ const CACHE_TTL_MS = 60 * 1_000; // 60 seconds
 const CACHE_MAX_SIZE = 100;
 const cache = new Map<string, CacheEntry>();
 
+// In-flight request coalescing: cacheKey → pending fetch-and-cache promise.
+// Without this, N concurrent misses for the same key (same mint/timeframe/
+// aggregate/limit) each independently call getTopPool + fetchOhlcv against
+// GeckoTerminal — a third-party API with its own rate limits shared across
+// this whole process, so duplicate concurrent calls risk exhausting that
+// budget and degrading /chart for everyone, not just the requester. Mirrors
+// the proven pattern in oracle-router.ts: the entry is deleted only after
+// settling, so a request arriving immediately after resolution sees a
+// populated cache rather than racing to start its own fetch.
+const inflight = new Map<string, Promise<{ candles: CandleData[]; poolAddress: string | null }>>();
+
 // ── GeckoTerminal helpers ──────────────────────────────────────────────────
 const GECKO_BASE = "https://api.geckoterminal.com/api/v2";
 const GECKO_HEADERS = { Accept: "application/json;version=20230302" };
@@ -140,6 +151,39 @@ async function fetchOhlcv(
   }
 }
 
+// Resolves the pool and fetches OHLCV for a cache-miss, then caches a
+// non-empty result. Shared by all coalesced callers via the `inflight` map
+// above, so the cache write happens once per miss-episode regardless of how
+// many concurrent requests triggered it.
+async function fetchAndCache(
+  mint: string,
+  timeframe: Timeframe,
+  aggregate: number,
+  limit: number,
+  cacheKey: string,
+): Promise<{ candles: CandleData[]; poolAddress: string | null }> {
+  const poolAddress = await getTopPool(mint);
+  if (!poolAddress) {
+    return { candles: [], poolAddress: null };
+  }
+
+  const candles = await fetchOhlcv(poolAddress, timeframe, aggregate, limit);
+
+  // Only cache non-empty results to avoid persisting upstream failures
+  if (candles.length > 0) {
+    cache.set(cacheKey, { candles, poolAddress, fetchedAt: Date.now() });
+
+    // Evict oldest entries when over limit (Map iteration order = insertion order)
+    while (cache.size > CACHE_MAX_SIZE) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey) cache.delete(oldestKey);
+      else break;
+    }
+  }
+
+  return { candles, poolAddress };
+}
+
 // ── Route ──────────────────────────────────────────────────────────────────
 export function chartRoutes(): Hono {
   const app = new Hono();
@@ -188,30 +232,17 @@ export function chartRoutes(): Hono {
       );
     }
 
-    // Step 1: resolve top pool
-    const poolAddress = await getTopPool(mint);
-    if (!poolAddress) {
-      return c.json(
-        { candles: [], poolAddress: null, cached: false },
-        200,
-        { "Cache-Control": "public, max-age=60, stale-while-revalidate=120" }
-      );
+    // Coalesce concurrent misses for this exact key: only the first request
+    // calls getTopPool/fetchOhlcv; concurrent requests await the same
+    // promise instead of each independently hitting GeckoTerminal.
+    let inFlightPromise = inflight.get(cacheKey);
+    if (!inFlightPromise) {
+      inFlightPromise = fetchAndCache(mint, timeframe, aggregate, limit, cacheKey).finally(() => {
+        inflight.delete(cacheKey);
+      });
+      inflight.set(cacheKey, inFlightPromise);
     }
-
-    // Step 2: fetch OHLCV
-    const candles = await fetchOhlcv(poolAddress, timeframe, aggregate, limit);
-
-    // Only cache non-empty results to avoid persisting upstream failures
-    if (candles.length > 0) {
-      cache.set(cacheKey, { candles, poolAddress, fetchedAt: Date.now() });
-    }
-
-    // Evict oldest entries when over limit (Map iteration order = insertion order)
-    while (cache.size > CACHE_MAX_SIZE) {
-      const oldestKey = cache.keys().next().value;
-      if (oldestKey) cache.delete(oldestKey);
-      else break;
-    }
+    const { candles, poolAddress } = await inFlightPromise;
 
     return c.json(
       { candles, poolAddress, cached: false },
