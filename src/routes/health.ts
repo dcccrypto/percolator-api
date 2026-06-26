@@ -12,9 +12,20 @@ const startTime = Date.now();
 const HEALTH_CACHE_TTL_MS = 5_000;
 let cachedHealth: { body: unknown; statusCode: number; checkedAt: number } | null = null;
 
+// The RPC check previously only verified that getSlot() resolved within the
+// timeout — a stale/lagging-but-responsive RPC node (returns a valid slot
+// every time, just one that never advances) would pass indefinitely. Track
+// the last reading and require the slot to have actually advanced once
+// enough wall-clock time has passed for any genuinely-live node to have
+// produced new slots (Solana's slot time is ~400-600ms even under
+// congestion, so 30s is a wide margin, not a tight one).
+const STALE_RPC_THRESHOLD_MS = 30_000;
+let lastRpcReading: { slot: number; checkedAt: number } | null = null;
+
 /** @internal Reset cache — used by tests to ensure isolation */
 export function __resetHealthCache(): void {
   cachedHealth = null;
+  lastRpcReading = null;
 }
 
 export function healthRoutes(): Hono {
@@ -27,15 +38,31 @@ export function healthRoutes(): Hono {
     const checks: { db: boolean; rpc: boolean; ws: boolean } = { db: false, rpc: false, ws: false };
     let status: "ok" | "degraded" | "down" = "ok";
     
-    // Check RPC connectivity
+    // Check RPC connectivity — and that it isn't just responding with a
+    // stale, non-advancing slot (see STALE_RPC_THRESHOLD_MS comment above).
     try {
-      await withRpcFallback(
+      const slot = await withRpcFallback(
         (conn) => conn.getSlot(),
         getConnection(),
         "healthcheck:getSlot",
         HEALTH_RPC_TIMEOUT_MS,
       );
-      checks.rpc = true;
+      const now = Date.now();
+      if (
+        lastRpcReading &&
+        slot <= lastRpcReading.slot &&
+        now - lastRpcReading.checkedAt > STALE_RPC_THRESHOLD_MS
+      ) {
+        logger.error("RPC check failed: slot has not advanced", {
+          lastSlot: lastRpcReading.slot,
+          slot,
+          elapsedMs: now - lastRpcReading.checkedAt,
+        });
+        checks.rpc = false;
+      } else {
+        checks.rpc = true;
+      }
+      lastRpcReading = { slot, checkedAt: now };
     } catch (err) {
       logger.error("RPC check failed", { error: truncateErrorMessage(err instanceof Error ? err.message : err, 120) });
       checks.rpc = false;

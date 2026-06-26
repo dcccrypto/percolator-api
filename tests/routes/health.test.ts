@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { healthRoutes, __resetHealthCache } from "../../src/routes/health.js";
 
 // Mock ws module
@@ -52,6 +52,63 @@ describe("health routes", () => {
 
     vi.mocked(getConnection).mockReturnValue(mockConnection);
     vi.mocked(getSupabase).mockReturnValue(mockSupabase);
+  });
+
+  describe("RPC staleness detection (BUG-109)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("detects a stale/lagging RPC node whose slot stops advancing", async () => {
+      vi.useFakeTimers();
+      mockConnection.getSlot.mockResolvedValue(100);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+
+      const app = healthRoutes();
+
+      // First check establishes the baseline reading — no prior reading
+      // exists yet, so this is healthy regardless of the slot value.
+      const res1 = await app.request("/health");
+      const data1 = await res1.json();
+      expect(data1.checks.rpc).toBe(true);
+
+      // Advance past both the 5s health-response cache and the 30s
+      // staleness threshold, with the node still returning the SAME slot —
+      // a genuinely live node would have advanced by many slots by now.
+      await vi.advanceTimersByTimeAsync(35_000);
+
+      const res2 = await app.request("/health");
+      const data2 = await res2.json();
+      expect(data2.checks.rpc).toBe(false);
+      expect(data2.status).not.toBe("ok");
+    });
+
+    it("does not flag staleness when the slot has genuinely advanced", async () => {
+      vi.useFakeTimers();
+      mockConnection.getSlot.mockResolvedValueOnce(100).mockResolvedValueOnce(200);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+
+      const app = healthRoutes();
+      await app.request("/health");
+      await vi.advanceTimersByTimeAsync(35_000);
+      const res2 = await app.request("/health");
+      const data2 = await res2.json();
+      expect(data2.checks.rpc).toBe(true);
+    });
+
+    it("does not flag staleness on rapid successive checks within the threshold window", async () => {
+      vi.useFakeTimers();
+      mockConnection.getSlot.mockResolvedValue(100);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+
+      const app = healthRoutes();
+      await app.request("/health");
+      // Past the 5s response cache, but well under the 30s staleness threshold.
+      await vi.advanceTimersByTimeAsync(10_000);
+      const res2 = await app.request("/health");
+      const data2 = await res2.json();
+      expect(data2.checks.rpc).toBe(true);
+    });
   });
 
   it("should return 200 with ok status when RPC and DB work", async () => {
