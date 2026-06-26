@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { insuranceRoutes } from "../../src/routes/insurance.js";
+import { clearCache } from "../../src/middleware/cache.js";
 
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
@@ -29,6 +30,7 @@ describe("insurance routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearCache();
 
     mockSupabase = {
       from: vi.fn(() => mockSupabase),
@@ -96,6 +98,50 @@ describe("insurance routes", () => {
       expect(data.feeRevenue).toBe("50000000");
       expect(data.totalOpenInterest).toBe("5000000000");
       expect(data.history).toHaveLength(2);
+    });
+
+    it("caches the response so a second request for the same slab does not re-query Supabase (BUG-106)", async () => {
+      const mockStats = {
+        insurance_balance: "1000000000",
+        insurance_fee_revenue: "50000000",
+        total_open_interest: "5000000000",
+      };
+      let fromCallCount = 0;
+      mockSupabase.from.mockImplementation((table: string) => {
+        fromCallCount++;
+        if (table === "market_stats") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                single: vi.fn().mockResolvedValue({ data: mockStats, error: null }),
+              })),
+            })),
+          };
+        } else if (table === "insurance_history") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+                })),
+              })),
+            })),
+          };
+        }
+        return mockSupabase;
+      });
+
+      const app = insuranceRoutes();
+      const res1 = await app.request("/insurance/5gX6nn6Jhh3Sxsb6FMvbVGdFspKT2vtdXxkWi2zwXmHp");
+      expect(res1.status).toBe(200);
+      const callsAfterFirst = fromCallCount;
+      expect(callsAfterFirst).toBeGreaterThan(0);
+
+      const res2 = await app.request("/insurance/5gX6nn6Jhh3Sxsb6FMvbVGdFspKT2vtdXxkWi2zwXmHp");
+      expect(res2.status).toBe(200);
+      expect(res2.headers.get("X-Cache")).toBe("HIT");
+      // No new Supabase calls — served entirely from cache.
+      expect(fromCallCount).toBe(callsAfterFirst);
     });
 
     it("should return 404 when market not found", async () => {

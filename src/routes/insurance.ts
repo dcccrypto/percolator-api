@@ -8,6 +8,7 @@
  */
 import { Hono } from "hono";
 import { validateSlab } from "../middleware/validateSlab.js";
+import { cacheMiddleware } from "../middleware/cache.js";
 import { getSupabase, createLogger, truncateErrorMessage } from "@percolator/shared";
 
 const logger = createLogger("api:insurance");
@@ -31,7 +32,7 @@ export function insuranceRoutes(): Hono {
    *   ]
    * }
    */
-  app.get("/insurance/:slab", validateSlab, async (c) => {
+  app.get("/insurance/:slab", cacheMiddleware(15), validateSlab, async (c) => {
     const slab = c.req.param("slab");
 
     try {
