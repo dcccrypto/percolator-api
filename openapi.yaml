@@ -60,6 +60,8 @@ tags:
     description: Auto-deleveraging rankings and trigger state
   - name: Chart
     description: OHLCV candlestick chart data
+  - name: Candles
+    description: Internal Percolator OHLCV candles derived from indexed trades
   - name: WebSocket
     description: WebSocket metrics and real-time data streaming
 
@@ -614,6 +616,63 @@ paths:
                 error: Upstream RPC timeout
                 slab: "ABC123..."
 
+  /candles/{slab}:
+    get:
+      tags:
+        - Candles
+      summary: Get internal OHLCV candles for a market
+      description: |
+        Returns OHLCV candlestick data bucketed in-process from indexed trades
+        in the `trades` table, following the TradingView UDF convention (the
+        same shape the frontend's Pyth Benchmarks proxy uses, so data sources
+        can be swapped without changing client-side parsing). Timestamps are
+        Unix seconds.
+      operationId: getCandles
+      parameters:
+        - $ref: '#/components/parameters/SlabAddress'
+        - name: resolution
+          in: query
+          description: |
+            Candle resolution. Maps to minutes except "1D" which buckets into
+            whole days.
+          schema:
+            type: string
+            enum: ["1", "5", "15", "60", "240", "1D"]
+            default: "1"
+        - name: from
+          in: query
+          description: Range start, Unix seconds
+          schema:
+            type: integer
+            default: 0
+        - name: to
+          in: query
+          description: Range end, Unix seconds (defaults to now)
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OHLCV candle data in UDF format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandlesResponse'
+        '400':
+          description: Invalid resolution or from/to range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandlesResponse'
+              example:
+                s: error
+                errmsg: "Invalid from/to"
+                t: []
+                o: []
+                h: []
+                l: []
+                c: []
+                v: []
+
   /chart/{mint}:
     get:
       tags:
@@ -909,19 +968,19 @@ components:
           type: integer
           nullable: true
         lastCrankSlot:
-          type: string
+          type: integer
           nullable: true
         lastPrice:
-          type: string
+          type: number
           nullable: true
         markPrice:
-          type: string
+          type: number
           nullable: true
         indexPrice:
-          type: string
+          type: number
           nullable: true
         fundingRate:
-          type: string
+          type: number
           nullable: true
         netLpPos:
           type: string
@@ -941,13 +1000,17 @@ components:
         lp_max_abs:
           type: string
         last_price:
-          type: string
+          type: number
+          nullable: true
         mark_price:
-          type: string
+          type: number
+          nullable: true
         index_price:
-          type: string
+          type: number
+          nullable: true
         funding_rate:
-          type: string
+          type: number
+          nullable: true
         insurance_balance:
           type: string
         insurance_fee_revenue:
@@ -955,7 +1018,8 @@ components:
         volume_24h:
           type: string
         last_crank_slot:
-          type: string
+          type: integer
+          nullable: true
         updated_at:
           type: string
           format: date-time
@@ -989,6 +1053,12 @@ components:
               type: string
         engine:
           type: object
+          nullable: true
+          description: |
+            On-chain engine state. Null for v17 market-group accounts — v17
+            engine state is per-portfolio, not stored in the market-group
+            account. Clients should query /markets/{slab}/stats for indexed
+            v17 state instead.
           properties:
             vault:
               type: string
@@ -1111,13 +1181,13 @@ components:
           type: string
           format: date-time
         slot:
-          type: string
+          type: integer
         rateBpsPerSlot:
           type: number
         netLpPos:
           type: string
         priceE6:
-          type: string
+          type: number
         fundingIndexQpbE6:
           type: string
 
@@ -1273,6 +1343,43 @@ components:
         pnlPctMillionths:
           type: string
           description: PnL percentage scaled by 1,000,000 (bigint as string)
+
+    CandlesResponse:
+      type: object
+      description: TradingView UDF-style OHLCV response. Parallel arrays indexed by position.
+      properties:
+        s:
+          type: string
+          enum: [ok, no_data, error]
+          description: Status — "ok" with data, "no_data" for an empty range, "error" on failure
+        errmsg:
+          type: string
+          description: Present only when s is "error"
+        t:
+          type: array
+          items:
+            type: integer
+          description: Bar open times, Unix seconds
+        o:
+          type: array
+          items:
+            type: number
+        h:
+          type: array
+          items:
+            type: number
+        l:
+          type: array
+          items:
+            type: number
+        c:
+          type: array
+          items:
+            type: number
+        v:
+          type: array
+          items:
+            type: number
 
     ChartResponse:
       type: object
