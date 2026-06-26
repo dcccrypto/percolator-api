@@ -27,6 +27,7 @@ import { docsRoutes } from "./routes/docs.js";
 import { adlRoutes } from "./routes/adl.js";
 import { setupWebSocket, cleanupPriceUpdateTimers, cleanupEventBusListeners } from "./routes/ws.js";
 import { OraclePriceBroadcaster } from "./services/OraclePriceBroadcaster.js";
+import { drainWebSocketClients, withTimeout } from "./utils/shutdown.js";
 import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
 import { ipBlocklist } from "./middleware/ip-blocklist.js";
 import { cacheMiddleware } from "./middleware/cache.js";
@@ -337,6 +338,18 @@ oraclePriceBroadcaster.start().catch((err) => {
 });
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
+// Bound on waiting for WS clients to ack a clean close handshake before this
+// process force-terminates them. The `ws` library's own per-socket
+// close-handshake timeout defaults to 30s — far longer than
+// SHUTDOWN_TIMEOUT_MS — so without an explicit, shorter bound here, a single
+// slow/unresponsive client can leave `wss.close()` below still pending when
+// the overall force-exit timer fires, which calls process.exit(1) BEFORE
+// server.close() (the HTTP drain) is ever reached.
+const WS_DRAIN_TIMEOUT_MS = 3_000;
+// sendInfoAlert (unlike flushSentry, which already caps at 2000ms below) has
+// no internal timeout — a hanging webhook would otherwise consume an
+// unbounded slice of the already-tight SHUTDOWN_TIMEOUT_MS budget.
+const SHUTDOWN_ALERT_TIMEOUT_MS = 2_000;
 
 async function shutdown(signal: string): Promise<void> {
   logger.info("Shutdown initiated", { signal });
@@ -347,15 +360,19 @@ async function shutdown(signal: string): Promise<void> {
     process.exit(1);
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
-  
+
   try {
     // Flush Sentry events before shutting down
     await flushSentry(2000);
-    
-    // Send shutdown alert
-    await sendInfoAlert("API service shutting down", [
-      { name: "Signal", value: signal, inline: true },
-    ]);
+
+    // Send shutdown alert — bounded so a hanging webhook can't eat the rest
+    // of the shutdown budget (see SHUTDOWN_ALERT_TIMEOUT_MS comment above).
+    await withTimeout(
+      sendInfoAlert("API service shutting down", [
+        { name: "Signal", value: signal, inline: true },
+      ]),
+      SHUTDOWN_ALERT_TIMEOUT_MS,
+    );
 
     // Clean up pending price update timers and unsubscribe shared eventBus
     // listeners before closing connections, so they don't keep stale state
@@ -363,11 +380,12 @@ async function shutdown(signal: string): Promise<void> {
     cleanupPriceUpdateTimers();
     cleanupEventBusListeners();
 
-    // Terminate all active WebSocket connections so they don't hold the server open
-    for (const client of wss.clients) {
-      client.close(1001, "Server shutting down");
-    }
-    
+    // Ask every WS client to close cleanly, then force-terminate any that
+    // haven't within WS_DRAIN_TIMEOUT_MS (see comment above) — this bounds
+    // how long this phase can take regardless of client behavior, so
+    // wss.close() right after is never left waiting on a stuck client.
+    await drainWebSocketClients(wss.clients, WS_DRAIN_TIMEOUT_MS);
+
     // Close WebSocket server (stops accepting new connections)
     logger.info("Closing WebSocket server");
     await new Promise<void>((resolve, reject) => {
@@ -377,7 +395,7 @@ async function shutdown(signal: string): Promise<void> {
       });
     });
     logger.info("WebSocket server closed");
-    
+
     // Close HTTP server (stops accepting new requests)
     logger.info("Closing HTTP server");
     await new Promise<void>((resolve, reject) => {
@@ -387,9 +405,9 @@ async function shutdown(signal: string): Promise<void> {
       });
     });
     logger.info("HTTP server closed");
-    
+
     // Note: Supabase client doesn't need explicit cleanup (connection pooling handled automatically)
-    
+
     logger.info("Shutdown complete");
     process.exit(0);
   } catch (err) {
