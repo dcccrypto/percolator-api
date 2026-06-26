@@ -54,10 +54,14 @@ export function healthRoutes(): Hono {
       checks.db = false;
     }
     
-    // Check WebSocket subsystem — saturated WS means new clients can't connect
+    // Check WebSocket subsystem — saturated WS means new clients can't connect.
+    // Use liveConnections (the `ws` library's own live socket count) rather
+    // than totalConnections, which lags behind during the async auth/rate-limit
+    // chain and would under-report true saturation under connection bursts.
     try {
       const wsMetrics = getWebSocketMetrics();
-      const utilization = wsMetrics.totalConnections / wsMetrics.limits.maxGlobalConnections;
+      const liveConnections = wsMetrics.liveConnections ?? wsMetrics.totalConnections;
+      const utilization = liveConnections / wsMetrics.limits.maxGlobalConnections;
       checks.ws = utilization < 0.95; // degraded if >95% of connection slots used
     } catch {
       checks.ws = false;

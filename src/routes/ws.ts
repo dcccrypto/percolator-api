@@ -201,6 +201,15 @@ const metrics: Metrics = {
   lastResetTime: Date.now(),
 };
 
+// metrics.totalConnections only reflects sockets that have finished the
+// async IP-blocklist/auth-ban/rate-limit chain in the "connection" handler
+// below — a burst of concurrent handshakes can sit open at the `ws` library
+// level for that entire await chain before metrics.totalConnections is ever
+// incremented. Holding the live wss instance lets callers (health checks)
+// read wss.clients.size, the library's own real-time count, instead of
+// trusting our slower-to-update bookkeeping.
+let liveWss: WebSocketServer | null = null;
+
 /**
  * Safely send a JSON-serializable payload to a WebSocket client.
  *
@@ -458,6 +467,11 @@ export function getWebSocketMetrics(): any {
 
   return {
     totalConnections: metrics.totalConnections,
+    // The live count from the `ws` library itself — includes sockets still
+    // mid-handshake in the async auth/rate-limit chain that totalConnections
+    // hasn't counted yet. Falls back to totalConnections if the WS server
+    // hasn't been set up yet (e.g. in tests that don't call setupWebSocket).
+    liveConnections: liveWss ? liveWss.clients.size : metrics.totalConnections,
     connectionsPerSlab: Object.fromEntries(metrics.connectionsPerSlab),
     messagesPerSec: parseFloat((metrics.messagesReceived / elapsedSec).toFixed(2)),
     bytesPerSec: parseInt((metrics.bytesSent / elapsedSec).toFixed(0), 10),
@@ -472,6 +486,7 @@ export function getWebSocketMetrics(): any {
 
 export function setupWebSocket(server: Server): WebSocketServer {
   const wss = new WebSocketServer({ server, maxPayload: 1024 });
+  liveWss = wss;
 
   // Idempotent re-entry: drop any listeners left over from a previous call
   // (tests, hot reload, restart) before re-registering. The eventBus is a

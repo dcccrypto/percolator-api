@@ -54,6 +54,41 @@ describe("health routes", () => {
     vi.mocked(getSupabase).mockReturnValue(mockSupabase);
   });
 
+  describe("WS liveness check (BUG-110)", () => {
+    it("flags ws as degraded when liveConnections (not totalConnections) is near the cap", async () => {
+      mockConnection.getSlot.mockResolvedValue(100);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+      // totalConnections (our slower bookkeeping) looks fine, but
+      // liveConnections (the real wss.clients.size) is saturated — the
+      // check must use the latter.
+      vi.mocked(getWebSocketMetrics).mockReturnValue({
+        totalConnections: 0,
+        liveConnections: 999,
+        limits: { maxGlobalConnections: 1000 },
+      });
+
+      const app = healthRoutes();
+      const res = await app.request("/health");
+      const data = await res.json();
+      expect(data.checks.ws).toBe(false);
+      expect(data.status).not.toBe("ok");
+    });
+
+    it("falls back to totalConnections when liveConnections is absent", async () => {
+      mockConnection.getSlot.mockResolvedValue(100);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+      vi.mocked(getWebSocketMetrics).mockReturnValue({
+        totalConnections: 5,
+        limits: { maxGlobalConnections: 1000 },
+      });
+
+      const app = healthRoutes();
+      const res = await app.request("/health");
+      const data = await res.json();
+      expect(data.checks.ws).toBe(true);
+    });
+  });
+
   it("should return 200 with ok status when RPC and DB work", async () => {
     mockConnection.getSlot.mockResolvedValue(123456789);
     mockSupabase.select.mockResolvedValue({ count: 5, error: null });
