@@ -9,6 +9,14 @@ vi.mock("../../src/routes/ws.js", () => ({
   })),
 }));
 
+// Mock the oracle-price broadcaster singleton — defaults to healthy so
+// existing tests' "ok"/"degraded" expectations (written before this check
+// existed) don't need touching beyond the "down" test below, which must
+// fail every check including this one to keep asserting 503.
+vi.mock("../../src/services/OraclePriceBroadcaster.js", () => ({
+  getOraclePriceBroadcaster: vi.fn(() => ({ isHealthy: vi.fn(() => true) })),
+}));
+
 // Mock @percolator/shared
 vi.mock("@percolator/shared", () => ({
   getSupabase: vi.fn(),
@@ -32,6 +40,7 @@ vi.mock("@percolator/shared", () => ({
 
 const { getConnection, getSupabase } = await import("@percolator/shared");
 const { getWebSocketMetrics } = await import("../../src/routes/ws.js");
+const { getOraclePriceBroadcaster } = await import("../../src/services/OraclePriceBroadcaster.js");
 
 describe("health routes", () => {
   let mockConnection: any;
@@ -102,6 +111,7 @@ describe("health routes", () => {
     mockConnection.getSlot.mockRejectedValue(new Error("RPC error"));
     mockSupabase.select.mockRejectedValue(new Error("DB error"));
     vi.mocked(getWebSocketMetrics).mockImplementation(() => { throw new Error("WS unavailable"); });
+    vi.mocked(getOraclePriceBroadcaster).mockReturnValue({ isHealthy: () => false } as any);
 
     const app = healthRoutes();
     const res = await app.request("/health");
@@ -112,6 +122,40 @@ describe("health routes", () => {
     expect(data.checks.rpc).toBe(false);
     expect(data.checks.db).toBe(false);
     expect(data.checks.ws).toBe(false);
+    expect(data.checks.priceBroadcaster).toBe(false);
+  });
+
+  describe("priceBroadcaster check (BUG-103)", () => {
+    it("reports degraded (not down) when only the oracle-price broadcaster is unhealthy", async () => {
+      mockConnection.getSlot.mockResolvedValue(123456789);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+      vi.mocked(getOraclePriceBroadcaster).mockReturnValue({ isHealthy: () => false } as any);
+
+      const app = healthRoutes();
+      const res = await app.request("/health");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.status).toBe("degraded");
+      expect(data.checks.priceBroadcaster).toBe(false);
+      expect(data.checks.rpc).toBe(true);
+      expect(data.checks.db).toBe(true);
+    });
+
+    it("treats a thrown error from the broadcaster as unhealthy rather than crashing the health check", async () => {
+      mockConnection.getSlot.mockResolvedValue(123456789);
+      mockSupabase.select.mockResolvedValue({ count: 5, error: null });
+      vi.mocked(getOraclePriceBroadcaster).mockImplementation(() => {
+        throw new Error("broadcaster unavailable");
+      });
+
+      const app = healthRoutes();
+      const res = await app.request("/health");
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.checks.priceBroadcaster).toBe(false);
+    });
   });
 
   it("should include uptime in response", async () => {

@@ -5,6 +5,7 @@ import { withRpcFallback } from "../utils/rpc-fallback.js";
 import { HEALTH_RPC_TIMEOUT_MS } from "../utils/rpc-timeout.js";
 import { getWebSocketMetrics } from "./ws.js";
 import { requireApiKey } from "../middleware/auth.js";
+import { getOraclePriceBroadcaster } from "../services/OraclePriceBroadcaster.js";
 
 const logger = createLogger("api:health");
 const startTime = Date.now();
@@ -24,7 +25,8 @@ export function healthRoutes(): Hono {
     if (cachedHealth && Date.now() - cachedHealth.checkedAt < HEALTH_CACHE_TTL_MS) {
       return c.json(cachedHealth.body, cachedHealth.statusCode as 200 | 503);
     }
-    const checks: { db: boolean; rpc: boolean; ws: boolean } = { db: false, rpc: false, ws: false };
+    const checks: { db: boolean; rpc: boolean; ws: boolean; priceBroadcaster: boolean } =
+      { db: false, rpc: false, ws: false, priceBroadcaster: false };
     let status: "ok" | "degraded" | "down" = "ok";
     
     // Check RPC connectivity
@@ -61,6 +63,16 @@ export function healthRoutes(): Hono {
       checks.ws = utilization < 0.95; // degraded if >95% of connection slots used
     } catch {
       checks.ws = false;
+    }
+
+    // Check the oracle-price Realtime bridge. Without this, the channel can
+    // drop (CHANNEL_ERROR/TIMED_OUT/CLOSED) and live WS price broadcasts go
+    // silently dead — this check is what makes that visible instead of
+    // reporting "ok" while no live prices are flowing.
+    try {
+      checks.priceBroadcaster = getOraclePriceBroadcaster().isHealthy();
+    } catch {
+      checks.priceBroadcaster = false;
     }
 
     // Determine overall status

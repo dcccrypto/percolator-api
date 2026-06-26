@@ -37,12 +37,65 @@ interface OraclePriceRow {
   network: string;
 }
 
+/** Statuses Supabase Realtime's .subscribe() callback can report, plus the
+ *  two states this class itself tracks before a subscription has ever been
+ *  attempted or after stop() has been called. */
+export type BroadcasterStatus =
+  | "not_started"
+  | "JOINING"
+  | "SUBSCRIBED"
+  | "CHANNEL_ERROR"
+  | "TIMED_OUT"
+  | "CLOSED"
+  | "stopped";
+
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+
 export class OraclePriceBroadcaster {
   private channel: RealtimeChannel | null = null;
   private started = false;
+  private stopped = false;
+  private lastStatus: BroadcasterStatus = "not_started";
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+
+  /** Current Realtime subscription status — used by /health (see health.ts). */
+  getStatus(): BroadcasterStatus {
+    return this.lastStatus;
+  }
+
+  /** True only while genuinely subscribed and receiving live updates. */
+  isHealthy(): boolean {
+    return this.lastStatus === "SUBSCRIBED";
+  }
+
+  private scheduleReconnect(network: string): void {
+    if (this.stopped || this.reconnectTimer) return;
+    const delayMs = Math.min(
+      RECONNECT_MAX_DELAY_MS,
+      RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt,
+    );
+    this.reconnectAttempt++;
+    logger.warn("oracle-price broadcaster scheduling reconnect", {
+      network,
+      delayMs,
+      attempt: this.reconnectAttempt,
+    });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.started = false; // allow start() to actually run again
+      this.start().catch((err) => {
+        logger.error("oracle-price broadcaster reconnect attempt failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }, delayMs);
+    this.reconnectTimer.unref?.();
+  }
 
   async start(): Promise<void> {
-    if (this.started) return;
+    if (this.started || this.stopped) return;
     this.started = true;
 
     const network = getNetwork();
@@ -90,12 +143,19 @@ export class OraclePriceBroadcaster {
           // Log every status transition so we can see where we are if a
           // SUBSCRIBED never lands. Supabase Realtime emits: CHANNEL_ERROR,
           // TIMED_OUT, CLOSED, SUBSCRIBED — plus occasional JOINING.
+          this.lastStatus = status as BroadcasterStatus;
           const fields: Record<string, unknown> = { status, network };
           if (err) fields.error = err instanceof Error ? err.message : String(err);
           if (status === "SUBSCRIBED") {
             logger.info("oracle-price broadcaster subscribed", fields);
+            this.reconnectAttempt = 0; // backoff resets once a connection actually succeeds
           } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
             logger.error("oracle-price broadcaster channel problem", fields);
+            // Without this, the channel stays dead until process restart —
+            // Realtime does not retry on its own once it reports one of
+            // these terminal statuses.
+            this.started = false;
+            this.scheduleReconnect(network);
           } else {
             logger.info("oracle-price broadcaster status", fields);
           }
@@ -105,10 +165,16 @@ export class OraclePriceBroadcaster {
         error: err instanceof Error ? err.message : String(err),
       });
       this.started = false;
+      this.scheduleReconnect(network);
     }
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.channel) {
       try {
         await getSupabase().removeChannel(this.channel);
@@ -118,5 +184,17 @@ export class OraclePriceBroadcaster {
       this.channel = null;
     }
     this.started = false;
+    this.lastStatus = "stopped";
   }
+}
+
+// Singleton accessor so health.ts can read the same instance index.ts
+// starts, regardless of module import/call order — index.ts currently
+// registers routes (including healthRoutes(), which reads this) before it
+// creates and starts the broadcaster.
+let _instance: OraclePriceBroadcaster | null = null;
+
+export function getOraclePriceBroadcaster(): OraclePriceBroadcaster {
+  if (!_instance) _instance = new OraclePriceBroadcaster();
+  return _instance;
 }
