@@ -5,3 +5,12 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# This project uses pnpm exclusively (see pnpm-lock.yaml, pnpm-workspace.yaml,
+# and CI/Dockerfile, which all run `pnpm install --frozen-lockfile`).
+# package-lock.json is npm's, not pnpm's — if it's present, `npm install`
+# becomes possible and silently resolves dependencies differently than
+# pnpm-lock.yaml does (different @percolator/shared commit, @percolatorct/sdk
+# from the npm registry instead of the local monorepo path). Ignored so it
+# can't be accidentally recommitted by running npm locally.
+package-lock.json
