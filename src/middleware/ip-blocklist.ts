@@ -19,10 +19,10 @@ const logger = createLogger("api:ip-blocklist");
  */
 
 const PROXY_DEPTH = (() => {
-  const parsed = Number(process.env.TRUSTED_PROXY_DEPTH ?? 1);
+  const parsed = Number(process.env.TRUSTED_PROXY_DEPTH ?? 0);
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
     logger.warn("Invalid TRUSTED_PROXY_DEPTH, falling back to default", { value: process.env.TRUSTED_PROXY_DEPTH });
-    return 1;
+    return 0;
   }
   return parsed;
 })();

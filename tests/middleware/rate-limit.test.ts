@@ -1,5 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
 import { Hono } from "hono";
+
+// These existing rate-limit tests intentionally exercise trusted-proxy
+// X-Forwarded-For parsing. The secure fail-closed default is covered by
+// tests/middleware/proxy-depth-default.test.ts.
+const originalTrustedProxyDepth = vi.hoisted(() => process.env.TRUSTED_PROXY_DEPTH);
+
+vi.hoisted(() => {
+  process.env.TRUSTED_PROXY_DEPTH = "1";
+});
+
+afterAll(() => {
+  if (originalTrustedProxyDepth === undefined) delete process.env.TRUSTED_PROXY_DEPTH;
+  else process.env.TRUSTED_PROXY_DEPTH = originalTrustedProxyDepth;
+});
 
 vi.mock("@percolator/shared", () => ({
   createLogger: vi.fn(() => ({
