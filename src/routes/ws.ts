@@ -43,7 +43,12 @@ const MAX_UNAUTHENTICATED_CONNECTIONS_PER_IP = safePositiveInt(
  * WS_AUTH_SECRET behavior:
  * - If set: Used for Bearer token validation. Secure, random 256-bit recommended.
  * - If not set in production: Startup fails with FATAL error (see lines 36-47)
- * - If not set in development: Falls back to dev-only default. DO NOT use in production.
+ * - If not set in development: token signing and verification are DISABLED and
+ *   fail closed (#212). There is no dev-only default secret — an earlier version
+ *   of this comment claimed one, but the code fell back to the empty string,
+ *   which is a usable HMAC key and therefore trivially forgeable. Unauthenticated
+ *   clients still connect in development via WS_AUTH_REQUIRED=false, which
+ *   auto-authenticates at upgrade time without consulting a token.
  *
  * DESIGN: Fail-closed for production. Any misconfiguration causes startup failure,
  * preventing accidental unauth deployments.
@@ -72,8 +77,17 @@ if (!WS_AUTH_SECRET) {
   logger.warn("WS_AUTH_SECRET not set — token validation will be inactive");
 }
 
-// Use WS_AUTH_SECRET when available; empty string when auth is not required
+// Use WS_AUTH_SECRET when available; empty string when auth is not required.
+//
+// #212: an empty string is a USABLE HMAC key, so signing/verifying with it
+// produces signatures any attacker can reproduce. Production and
+// WS_AUTH_REQUIRED=true both exit above, but a non-production deploy with
+// WS_AUTH_REQUIRED=false still reached verifyWsToken() via the `auth` message
+// path and accepted tokens signed with "". WS_SECRET_USABLE gates every HMAC
+// operation so that an unset secret fails closed instead of silently
+// authenticating forged tokens.
 const WS_SECRET = WS_AUTH_SECRET || "";
+const WS_SECRET_USABLE = WS_SECRET.length > 0;
 
 // BH2: Heartbeat configuration
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
@@ -297,6 +311,14 @@ function getClientIp(req: IncomingMessage): string | null {
  * This is a simple token system - can be upgraded to JWT later
  */
 export function generateWsToken(slabAddress: string): string {
+  // #212: refuse to mint a token keyed with the empty string — it would be
+  // forgeable by anyone. Throwing is correct here: a caller that cannot sign
+  // must not receive a token-shaped string it would treat as authoritative.
+  if (!WS_SECRET_USABLE) {
+    throw new Error(
+      "Refusing to generate a WS auth token: WS_AUTH_SECRET is not set"
+    );
+  }
   const timestamp = Date.now();
   const payload = `${slabAddress}:${timestamp}`;
   const hmac = createHmac("sha256", WS_SECRET);
@@ -312,6 +334,19 @@ export function generateWsToken(slabAddress: string): string {
  */
 function verifyWsToken(token: string, expectedSlab?: string): { isValid: boolean; slabAddress: string | null } {
   try {
+    // #212: fail closed when no secret is configured. Without this, HMACs are
+    // keyed with "" and any client can forge a token that verifies. This path
+    // is reachable in non-production with WS_AUTH_REQUIRED=false, where the
+    // `auth` message handler calls verifyWsToken() regardless of whether auth
+    // is required. Clients still connect fine in that mode — upgrade-time
+    // auto-authentication does not depend on a token.
+    if (!WS_SECRET_USABLE) {
+      logger.error(
+        "Refusing to verify WS auth token: WS_AUTH_SECRET is not set"
+      );
+      return { isValid: false, slabAddress: null };
+    }
+
     const parts = token.split(":");
     if (parts.length !== 3) return { isValid: false, slabAddress: null };
     
