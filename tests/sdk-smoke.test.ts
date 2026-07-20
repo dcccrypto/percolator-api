@@ -54,6 +54,7 @@ import {
   getMatcherProgramId,
   getCurrentNetwork,
   PROGRAM_IDS,
+  V17_PROGRAMS_DEPLOYED,
   // oracle/price-router.ts  (used by oracle-router.ts route)
   resolvePrice,
   // v17 crank encoder
@@ -262,13 +263,31 @@ describe("@percolatorct/sdk exports — PDA derivation", () => {
 // ── 7. Program IDs ────────────────────────────────────────────────────────────
 
 describe("@percolatorct/sdk exports — program IDs", () => {
-  it("getProgramId returns a valid PublicKey for devnet", () => {
+  // The v17 SDK fails closed until the converged v17 programs are deployed
+  // (Phase 7 cutover gate): rather than hand back a legacy address that cannot
+  // decode v17 instruction payloads, getProgramId()/getMatcherProgramId() throw
+  // while V17_PROGRAMS_DEPLOYED === false. Assert whichever half of that
+  // contract is live so this smoke test stays honest across the cutover.
+  // Widened to boolean — the SDK types the constant as the literal `false`.
+  const v17Deployed: boolean = V17_PROGRAMS_DEPLOYED;
+
+  it("getProgramId honours the v17 deployment gate for devnet", () => {
+    if (!v17Deployed) {
+      expect(() => getProgramId("devnet")).toThrow(/v17 program is not deployed/);
+      return;
+    }
     const id = getProgramId("devnet");
     expect(id).toBeInstanceOf(PublicKey);
     expect(id.toBase58().length).toBeGreaterThan(0);
   });
 
-  it("getMatcherProgramId returns a valid PublicKey for devnet", () => {
+  it("getMatcherProgramId honours the v17 deployment gate for devnet", () => {
+    if (!v17Deployed) {
+      expect(() => getMatcherProgramId("devnet")).toThrow(
+        /v17 matcher program is not deployed/,
+      );
+      return;
+    }
     const id = getMatcherProgramId("devnet");
     expect(id).toBeInstanceOf(PublicKey);
   });
