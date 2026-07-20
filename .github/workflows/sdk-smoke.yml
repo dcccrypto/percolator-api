@@ -56,15 +56,34 @@ jobs:
 
       # Resolve the version to test: repository_dispatch payload > workflow_dispatch
       # input > pinned default.
+      # Attacker-controlled data (client_payload / inputs) is passed through `env:`
+      # and never interpolated into the shell with `${{ }}`, which GitHub expands
+      # *before* the shell parses the line — quoting does not contain it (#206).
+      # The semver allowlist is the actual boundary: anything carrying shell
+      # metacharacters fails the gate before it can reach `pnpm add`.
       - name: Resolve SDK version
         id: sdk_ver
+        env:
+          PAYLOAD_VERSION: ${{ github.event.client_payload.version }}
+          INPUT_VERSION: ${{ inputs.sdk_version }}
+          DEFAULT_VERSION: ${{ env.SDK_VERSION }}
         run: |
-          VERSION="${{ github.event.client_payload.version }}"
-          if [ -z "$VERSION" ]; then
-            VERSION="${{ inputs.sdk_version }}"
-          fi
-          if [ -z "$VERSION" ]; then
-            VERSION="${{ env.SDK_VERSION }}"
+          VERSION="${PAYLOAD_VERSION:-${INPUT_VERSION:-$DEFAULT_VERSION}}"
+          # `grep -E` is line-oriented, so an anchored ^...$ regex alone is NOT
+          # sufficient: a value like $'1.0.0\ntouch /tmp/pwned' satisfies the
+          # pattern on its first line while smuggling a second line into
+          # $GITHUB_OUTPUT, which GitHub then parses as an extra step output.
+          # `case` matches the WHOLE string (newlines included), so reject any
+          # character outside the semver alphabet before the shape check.
+          case "$VERSION" in
+            ""|*[!0-9A-Za-z.-]*)
+              echo "Refusing to smoke-test a non-semver SDK version: $VERSION"
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'; then
+            echo "Refusing to smoke-test a non-semver SDK version: $VERSION"
+            exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Testing @percolatorct/sdk@$VERSION"
@@ -77,16 +96,20 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Override SDK dep with published npm version
+        env:
+          SDK_VER: ${{ steps.sdk_ver.outputs.version }}
         run: |
-          pnpm add "@percolatorct/sdk@${{ steps.sdk_ver.outputs.version }}" \
+          pnpm add "@percolatorct/sdk@${SDK_VER}" \
             --no-frozen-lockfile
 
       - name: Verify installed SDK version
+        env:
+          SDK_VER: ${{ steps.sdk_ver.outputs.version }}
         run: |
           INSTALLED=$(node -e "console.log(require('./node_modules/@percolatorct/sdk/package.json').version)")
           echo "Installed: $INSTALLED"
-          if [ "$INSTALLED" != "${{ steps.sdk_ver.outputs.version }}" ]; then
-            echo "Version mismatch: expected ${{ steps.sdk_ver.outputs.version }}, got $INSTALLED"
+          if [ "$INSTALLED" != "$SDK_VER" ]; then
+            echo "Version mismatch: expected $SDK_VER, got $INSTALLED"
             exit 1
           fi
 
@@ -95,10 +118,13 @@ jobs:
 
       - name: Report result
         if: always()
+        env:
+          SDK_VER: ${{ steps.sdk_ver.outputs.version }}
+          JOB_STATUS: ${{ job.status }}
         run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "@percolatorct/sdk@${{ steps.sdk_ver.outputs.version }} smoke PASSED"
+          if [ "$JOB_STATUS" = "success" ]; then
+            echo "@percolatorct/sdk@${SDK_VER} smoke PASSED"
           else
-            echo "@percolatorct/sdk@${{ steps.sdk_ver.outputs.version }} smoke FAILED"
+            echo "@percolatorct/sdk@${SDK_VER} smoke FAILED"
             exit 1
           fi
