@@ -2,6 +2,7 @@ import type { Context, Next } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { createLogger } from "@percolator/shared";
 import { getSharedStore } from "./shared-store.js";
+import { rateLimitKey } from "../utils/ip-key.js";
 
 const logger = createLogger("api:rate-limit");
 
@@ -78,8 +79,10 @@ export function readRateLimit() {
       return c.json({ error: "Bad request" }, 400);
     }
 
+    // #205: key IPv6 clients by /64, not by the full /128. `ip` itself stays
+    // the exact address so logs and error paths keep full fidelity.
     const bucket = await getSharedStore().incrementRateBucket(
-      `read:${ip}`,
+      `read:${rateLimitKey(ip)}`,
       WINDOW_MS,
       MAX_RATE_LIMIT_ENTRIES
     );
@@ -114,8 +117,9 @@ export function writeRateLimit() {
       return c.json({ error: "Bad request" }, 400);
     }
 
+    // #205: see readRateLimit — IPv6 buckets are keyed by /64.
     const bucket = await getSharedStore().incrementRateBucket(
-      `write:${ip}`,
+      `write:${rateLimitKey(ip)}`,
       WINDOW_MS,
       MAX_RATE_LIMIT_ENTRIES
     );
