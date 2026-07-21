@@ -15,7 +15,7 @@
   "dependencies": {
     "@hono/node-server": "^1.19.11",
     "@percolator/shared": "github:dcccrypto/percolator-shared#489f5b48b6d7826ce62bae6734bb3d078c392730",
-    "@percolatorct/sdk": "file:../../percolator-sdk",
+    "@percolatorct/sdk": "github:dcccrypto/percolator-sdk#673bc4717480f54f678c0f07246b26b84d703212",
     "@sentry/node": "^10.39.0",
     "@solana/web3.js": "^1.98.0",
     "@supabase/supabase-js": "^2.49.1",
