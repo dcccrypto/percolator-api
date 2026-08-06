@@ -73,6 +73,28 @@ jobs:
       # packages (hono, vitest, @solana/web3.js …) are present, then override
       # only the SDK dep to the target npm version.  --no-frozen-lockfile is
       # intentional: we are mutating one dep, not reproducing a build.
+      # #232: package.json + pnpm-lock.yaml resolve @percolatorct/sdk as
+      # `file:../../percolator-sdk`, so a bare checkout has no SDK to install and
+      # the install below dies with
+      # `ENOENT ... scandir '<runner>/work/percolator-sdk'` (exit 254) — which is
+      # what this nightly has actually been failing on, before any SDK version is
+      # ever resolved. ci.yml gets this treatment in #233; sdk-smoke.yml was left
+      # out, so the smoke stayed red even with a correct pin.
+      # Path is TWO levels up: from `<runner>/work/percolator-api/percolator-api`
+      # that is `<runner>/work`. actions/checkout cannot write outside
+      # GITHUB_WORKSPACE, so check out into the workspace and then move it up.
+      # percolator-sdk is public, so the default token suffices.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: dcccrypto/percolator-sdk
+          ref: main
+          path: _percolator-sdk
+      - name: Place @percolatorct/sdk as a sibling checkout (#232)
+        run: |
+          rm -rf ../../percolator-sdk
+          mv _percolator-sdk ../../percolator-sdk
+          test -f ../../percolator-sdk/dist/index.js || { echo "SDK dist/ missing — the SDK repo ships a committed dist; aborting"; exit 1; }
+
       - name: Install dependencies (frozen lockfile for non-SDK packages)
         run: pnpm install --frozen-lockfile
 
