@@ -1,3 +1,23 @@
+> # ⚰️ DECOMMISSIONED — archived 2026-08-18
+>
+> This service is **no longer deployed** and this repository is **archived (read-only)**.
+>
+> | endpoint | status |
+> |---|---|
+> | `percolator-api-production.up.railway.app` | `404 Application not found` |
+> | `api.percolatorlaunch.com` | NXDOMAIN |
+> | `api.percolator.trade` | NXDOMAIN |
+>
+> `percolator-launch` removed every proxy to this API (`app/app/api/prices/route.ts:95`); the live
+> playground serves those routes from its own Next handlers. `main` last moved 2026-06-24.
+>
+> **28 open PRs were closed with review notes on 2026-08-18** — each was reviewed on its merits
+> first; they were closed because the service is gone, not because the patches were wrong.
+>
+> The `sdk-smoke` publish-regression gate that lived here is **not lost** — it survives in
+> [`percolator-indexer`](https://github.com/dcccrypto/percolator-indexer/blob/main/.github/workflows/sdk-smoke.yml),
+> which is green nightly, pinned current, and injection-safe.
+
 # @percolator/api
 
 > REST API for the Percolator perpetual futures trading engine on Solana.
